@@ -1,122 +1,120 @@
-# What Is SpliceKit? (The Plain-English Version)
+SpliceKit이란 무엇인가? 한국어 버전
 
-So you've landed on the SpliceKit repo, scrolled through a wall of technical docs, and thought *"...what am I looking at?"* Totally fair. This page is for you.
+그러니까 당신은 SpliceKit 저장소에 도착했고, 기술 문서의 벽을 스크롤해 내려가다가 *“…내가 뭘 보고 있는 거지?”*라고 생각했습니다. 완전히 이해됩니다. 이 페이지는 당신을 위한 것입니다.
 
----
+⸻
 
-## The Short Version
+짧은 버전
 
-SpliceKit lets you control Final Cut Pro with text commands and AI instead of clicking buttons and dragging things around. It's also a plugin framework -- so you can build addons and plugins to do all kinds of awesome things that you couldn't normally do with FCP plugins.
+SpliceKit은 당신이 버튼을 클릭하고 여기저기 드래그하는 대신, 텍스트 명령과 AI로 Final Cut Pro를 제어하게 해줍니다. 그것은 또한 플러그인 프레임워크입니다. 그래서 당신은 FCP 플러그인으로는 일반적으로 할 수 없었던 모든 종류의 멋진 일을 하기 위해 애드온과 플러그인을 만들 수 있습니다.
 
----
+⸻
 
-## OK, But What Does That Actually Mean?
+알겠습니다, 그런데 그것이 실제로 무슨 뜻인가요?
 
-Final Cut Pro is a powerful video editor, but everything in it is manual. You click, drag, scrub, hunt through menus. That's fine for some tasks, but painful for others:
+Final Cut Pro는 강력한 비디오 편집기이지만, 그 안의 모든 것은 수동입니다. 당신은 클릭하고, 드래그하고, 훑어보고, 메뉴들을 뒤집니다. 그것은 어떤 작업들에는 괜찮지만, 다른 작업들에는 고통스럽습니다.
 
-- **Removing silences** from an hour-long interview? That's hundreds of manual cuts.
-- **Adding markers** at every beat of a song? Click... click... click...
-- **Applying the same color grade** to 50 clips? Hope you like copy-paste.
+* 한 시간짜리 인터뷰에서 침묵들을 제거하기? 그것은 수백 개의 수동 컷입니다.
+* 노래의 모든 박자마다 마커들을 추가하기? 클릭… 클릭… 클릭…
+* 50개의 클립에 같은 색 보정 적용하기? 복사-붙여넣기를 좋아하기를 바랍니다.
 
-SpliceKit is really a **collection of plugins** that already adds a ton of quality-of-life features to FCP out of the box, **plus** an AI framework and plugin system that makes it easy to add even more.
+SpliceKit은 사실 FCP에 이미 기본적으로 엄청나게 많은 삶의 질 기능을 추가하는 플러그인들의 모음이고, 거기에 더해 더 많은 것을 쉽게 추가할 수 있게 만드는 AI 프레임워크와 플러그인 시스템입니다.
 
-Here's some of what's already built in:
+이미 만들어져 있는 것들 중 일부는 다음과 같습니다.
 
-- **Silence Removal** -- automatically detects and removes dead air from interviews and podcasts
-- **Transcript Editor** -- transcribes your footage, shows you the words, and lets you edit your video by editing the text. Delete a sentence? The video gets cut too. Drag words around? The clips move to match.
-- **Command Palette** (Cmd+Shift+P) -- search and run any editing command by typing, instead of hunting through menus
-- **Scene Detection** -- automatically finds every cut/scene change in your footage
-- **Beat Detection** -- finds beats in music so you can sync edits to the rhythm
-- **Batch Export** -- export every clip on your timeline individually, with all effects baked in
-- **Social Media Captions** -- auto-generate word-by-word animated captions (TikTok/Reels style)
-- **AI Editing** -- describe what you want in plain English and let an AI assistant do the work
+* 침묵 제거 — 인터뷰와 팟캐스트에서 죽은 공기를 자동으로 감지하고 제거합니다.
+* 대본 편집기 — 당신의 영상을 전사하고, 단어들을 보여주며, 텍스트를 편집함으로써 당신의 비디오를 편집하게 해줍니다. 문장을 삭제한다고요? 비디오도 잘립니다. 단어들을 이리저리 드래그한다고요? 클립들이 그에 맞게 움직입니다.
+* 명령 팔레트 Cmd+Shift+P — 메뉴들을 뒤지는 대신, 타이핑해서 어떤 편집 명령이든 검색하고 실행합니다.
+* 장면 감지 — 당신의 영상에서 모든 컷/장면 변화를 자동으로 찾습니다.
+* 비트 감지 — 음악에서 비트를 찾아서 편집을 리듬에 동기화할 수 있게 합니다.
+* 일괄 내보내기 — 타임라인의 모든 클립을 개별적으로, 모든 효과가 구워진 상태로 내보냅니다.
+* 소셜 미디어 캡션 — 단어별로 움직이는 캡션을 자동 생성합니다. TikTok/Reels 스타일입니다.
+* AI 편집 — 당신이 원하는 것을 쉬운 영어로 설명하고 AI 어시스턴트가 작업을 하게 합니다.
 
-And because SpliceKit is a plugin framework, new features get added all the time. You can even **create your own plugins with the help of AI** -- describe what you want a plugin to do, and Claude can help you build it.
+그리고 SpliceKit은 플러그인 프레임워크이기 때문에, 새로운 기능들이 계속 추가됩니다. 당신은 심지어 AI의 도움으로 자신만의 플러그인을 만들 수도 있습니다. 플러그인이 무엇을 하기를 원하는지 설명하면, Claude가 그것을 만드는 것을 도와줄 수 있습니다.
 
----
+⸻
 
-## How Does It Work? (No CS Degree Required)
+어떻게 작동하나요? 컴퓨터공학 학위는 필요 없습니다
 
-Here's the non-technical version:
+비기술적인 버전은 이렇습니다.
 
-1. **SpliceKit patches your copy of Final Cut Pro.** It makes a separate copy of FCP in your home folder and adds a small plugin (a "dylib") to it. Your original FCP stays untouched.
+1. SpliceKit은 당신의 Final Cut Pro 복사본을 패치합니다. 그것은 당신의 홈 폴더 안에 FCP의 별도 복사본을 만들고, 거기에 작은 플러그인, 즉 “dylib”을 추가합니다. 당신의 원본 FCP는 건드리지 않은 채로 남아 있습니다.
+2. 당신이 패치된 FCP를 실행하면, SpliceKit이 그 안에서 깨어납니다. 그것은 이제 FCP가 하는 모든 것을 보고 제어할 수 있습니다. 타임라인, 당신의 클립들, 효과들, 재생, 그 모든 것입니다.
+3. 당신은 텍스트를 통해 SpliceKit과 대화합니다. 몇 가지 방법이 있습니다.
+    * FCP 안의 명령 팔레트, Cmd+Shift+P를 눌러 열고 원하는 것을 입력합니다.
+    * 텍스트 기반 편집을 위한 대본 패널
+    * 당신을 위해 편집 명령을 실행할 수 있는 AI 어시스턴트, 예를 들면 Claude
+    * 자신만의 자동화를 작성하고 싶다면 Python 스크립팅 인터페이스
 
-2. **When you launch the patched FCP, SpliceKit wakes up inside it.** It can now see and control everything FCP does -- the timeline, your clips, effects, playback, all of it.
+이렇게 생각해보세요. FCP는 핸들과 페달만 있는 자동차입니다. SpliceKit은 음성 제어와 오토파일럿을 추가합니다.
 
-3. **You talk to SpliceKit through text.** There are a few ways:
-   - A **Command Palette** inside FCP (press Cmd+Shift+P) where you type what you want
-   - A **Transcript Panel** for text-based editing
-   - An **AI assistant** (like Claude) that can run editing commands for you
-   - A **Python scripting** interface if you want to write your own automation
+⸻
 
-Think of it like this: FCP is a car with only a steering wheel and pedals. SpliceKit adds voice control and autopilot.
+안전한가요?
 
----
+이것은 모두가 묻는 질문이므로, 나누어 살펴봅시다.
 
-## Is It Safe?
+내 Mac이나 프로젝트를 망가뜨리나요?
 
-This is the question everyone asks, so let's break it down:
+아니요. SpliceKit은 ~/Applications/SpliceKit/ 안에 Final Cut Pro의 복사본을 만들고 그 복사본을 패치합니다. App Store에서 온 당신의 원본 FCP는 절대 수정되지 않습니다. 당신의 라이브러리, 프로젝트, 미디어 파일들은 패치 과정에 의해 변경되지 않습니다.
 
-### Will it break my Mac or my projects?
+그렇긴 하지만, SpliceKit은 당신이 요청할 때 실제 편집을 수행합니다. 어떤 편집 도구와 마찬가지로, 뭔가 잘못되면 되돌리기 Cmd+Z를 할 수 있고, 중요한 프로젝트의 백업을 보관해야 합니다.
 
-**No.** SpliceKit makes a *copy* of Final Cut Pro in `~/Applications/SpliceKit/` and patches the copy. Your original FCP from the App Store is never modified. Your libraries, projects, and media files are not changed by the patching process.
+Apple이 내 계정을 금지할까요?
 
-That said, SpliceKit *does* perform real edits when you ask it to. Just like any editing tool, you can undo (Cmd+Z) if something goes wrong, and you should keep backups of important projects.
+아니요. SpliceKit은 전적으로 당신의 로컬 기기에서 실행됩니다. 그것은 Apple의 서버를 수정하거나, 콘텐츠의 DRM을 우회하거나, 온라인에서 어떤 것도 하지 않습니다. 그것은 당신 자신의 자동차 보닛을 열고 터보차저를 추가하는 것과 같은 소프트웨어적 동등물입니다. Apple은 당신이 로컬에서 무엇을 실행하는지 감시하거나 제한하지 않습니다.
 
-### Will Apple ban my account?
+많은 인기 있는 Mac 앱들이 내부적으로 같은 방식으로 작동합니다. BetterTouchTool, 접근성 도구들 등이 그렇습니다.
 
-**No.** SpliceKit runs entirely on your local machine. It doesn't modify Apple's servers, bypass DRM on content, or do anything online. It's the software equivalent of opening the hood of your own car and adding a turbocharger -- Apple doesn't monitor or restrict what you run locally.
+합법인가요?
 
-Many popular Mac apps work the same way under the hood (BetterTouchTool, accessibility tools, etc.).
+예. 상호 운용성을 위한 리버스 엔지니어링은 다음에 따라 명시적으로 보호됩니다.
 
-### Is it legal?
+* DMCA Section 1201(f), 미국 법 — 당신은 소프트웨어를 다른 프로그램들과 작동하게 만들기 위해 소프트웨어를 리버스 엔지니어링할 수 있습니다.
+* EU Software Directive Article 6 — 유럽에서도 같은 원칙입니다.
 
-**Yes.** Reverse engineering for interoperability is explicitly protected under:
+SpliceKit은 MIT 라이선스입니다. 오픈 소스이고, 사용하고 수정하는 것이 무료입니다.
 
-- **DMCA Section 1201(f)** (US law) -- you're allowed to reverse-engineer software to make it work with other programs
-- **EU Software Directive Article 6** -- same principle in Europe
+실제 위험은 무엇인가요?
 
-SpliceKit is MIT licensed (open source, free to use and modify).
+솔직히 말하면:
 
-### What are the actual risks?
+* 향후 FCP 업데이트가 호환성을 깨뜨릴 수 있습니다. Apple이 FCP를 업데이트하면, SpliceKit은 다시 패치되어야 할 수 있습니다. 이것은 위험이 아니라 불편함입니다.
+* 그것은 Apple이 문서화하지 않은 내부 FCP API들을 사용합니다. 이것은 일부 기능들이 예외적인 경우에 예상치 못하게 동작할 수 있음을 의미합니다. 되돌리기 버튼은 당신의 친구입니다.
+* 그것은 FCP의 샌드박스를 비활성화합니다. 샌드박스는 FCP가 당신의 시스템에서 접근할 수 있는 것을 제한하는 보안 경계입니다. 이것은 플러그인이 작동하기 위해 필요합니다. 실제로 이것은 패치된 FCP가 당신의 Mac에 있는 다른 어떤 앱과 같은 파일 접근 권한을 갖는다는 뜻입니다.
 
-Being honest:
+⸻
 
-- **Future FCP updates could break compatibility.** When Apple updates FCP, SpliceKit may need to be re-patched. This is an inconvenience, not a danger.
-- **It uses internal FCP APIs that Apple doesn't document.** This means some features might behave unexpectedly on edge cases. The undo button is your friend.
-- **It disables FCP's sandbox** (the security boundary that limits what FCP can access on your system). This is required for the plugin to work. In practice, this just means the patched FCP has the same file access as any other app on your Mac.
+이것은 누구를 위한 것인가요?
 
----
+Final Cut Pro를 사용하는 모든 사람입니다. 진심입니다. SpliceKit의 이점을 얻기 위해 프로그래머나 파워 유저일 필요는 없습니다. 대부분의 내장 기능들은 모든 편집자가 고마워할 만한 것들입니다.
 
-## Who Is This For?
+* 캐주얼 편집자들 — 침묵 제거, 대본 편집, 그리고 명령 팔레트가 일상적인 편집을 더 빠르고 덜 지루하게 만듭니다.
+* 전문 편집자들 — 일괄 내보내기, 장면 감지, 비트 동기화, 그리고 캡션 생성은 실제 프로젝트에서 시간을 절약합니다.
+* 콘텐츠 크리에이터들 — TikTok/Reels 스타일 캡션을 자동 생성하고, 긴 녹화본을 빠르게 잘라내며, 소셜 미디어용 클립들을 일괄 처리합니다.
+* AI 지원 편집을 원하는 사람들 — 쉬운 영어로 편집을 설명하고 AI가 반복 작업을 처리하게 합니다.
+* 개발자들과 만지작거리기를 좋아하는 사람들 — Python, Lua 또는 AI 지원으로 자신만의 플러그인을 만듭니다. 플러그인 프레임워크는 FCP 안의 모든 것에 접근할 수 있게 해주므로, Apple의 공식 플러그인 시스템이 지원하지 않는 도구들을 만들 수 있습니다.
 
-**Everyone who uses Final Cut Pro.** Seriously. You don't need to be a programmer or a power user to benefit from SpliceKit. Most of the built-in features are things that every editor will appreciate:
+내장 플러그인들은 이미 가장 일반적인 고통 지점들을 처리합니다. 하지만 당신이 언젠가 *“FCP가 X를 할 수 있으면 좋겠는데”*라고 생각한다면, SpliceKit은 아마도 그것을 가능하게 만들고, AI는 당신이 코드 한 줄도 써본 적이 없더라도 그것을 만드는 것을 도와줄 수 있습니다.
 
-- **Casual editors** -- silence removal, transcript editing, and the command palette make everyday editing faster and less tedious
-- **Professional editors** -- batch export, scene detection, beat sync, and caption generation save hours on real projects
-- **Content creators** -- auto-generate TikTok/Reels-style captions, quickly cut down long recordings, batch-process clips for social media
-- **People who want AI-assisted editing** -- describe edits in plain English and let an AI handle the repetitive work for you
-- **Developers and tinkerers** -- build your own plugins in Python, Lua, or with AI assistance. The plugin framework gives you access to everything inside FCP, so you can create tools that Apple's official plugin system doesn't support
+⸻
 
-The built-in plugins already handle the most common pain points. But if you ever think *"I wish FCP could do X"* -- SpliceKit probably makes it possible, and AI can help you build it even if you've never written a line of code.
+어떻게 시작하나요?
 
----
+1. GitHub에서 저장소를 다운로드하거나 클론합니다.
+2. 패처를 실행합니다 — GUI 패처인 SpliceKitPatcher가 가장 쉬운 방법입니다. 그것은 한 번의 클릭으로 모든 것을 처리합니다.
+3. ~/Applications/SpliceKit/에서 패치된 FCP를 실행합니다.
+4. 명령 팔레트를 시도해봅니다 — Cmd+Shift+P를 누르고 입력을 시작합니다.
 
-## How Do I Get Started?
+그게 전부입니다. 당신의 원본 FCP는 완전히 변경되지 않은 채, 있던 바로 그 자리에 남아 있습니다.
 
-1. **Download or clone the repo** from GitHub
-2. **Run the patcher** -- the GUI patcher (`SpliceKitPatcher`) is the easiest way. It handles everything in one click.
-3. **Launch the patched FCP** from `~/Applications/SpliceKit/`
-4. **Try the Command Palette** -- press Cmd+Shift+P and start typing
+⸻
 
-That's it. Your original FCP stays right where it is, completely unchanged.
+아직 질문이 있나요?
 
----
+* 기술적 세부 사항은 메인 README￼를 확인하세요.
+* 특정 기능에 대한 심층 설명은 docs 폴더￼를 둘러보세요.
+* 뭔가 명확하지 않다면 GitHub에서 이슈를 여세요. 커뮤니티는 친절합니다.
 
-## Still Have Questions?
-
-- Check the [main README](../README.md) for technical details
-- Browse the [docs folder](.) for deep dives on specific features
-- Open an issue on GitHub if something's unclear -- the community is friendly
-
-You don't need to understand every ObjC class or JSON-RPC endpoint to use SpliceKit. Start with the Command Palette, try the Transcript Editor, and explore from there.
+SpliceKit을 사용하기 위해 모든 ObjC 클래스나 JSON-RPC 엔드포인트를 이해할 필요는 없습니다. 명령 팔레트로 시작하고, 대본 편집기를 시도하고, 거기서부터 탐색하세요.
