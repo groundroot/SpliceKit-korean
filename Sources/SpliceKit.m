@@ -122,6 +122,30 @@ void SpliceKit_log(NSString *format, ...) {
     SpliceKit_sentryLog(message, @"splicekit.log", nil);
 }
 
+BOOL SpliceKit_prefersKorean(void) {
+    static BOOL prefersKorean = NO;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSArray<NSString *> *preferred = [NSLocale preferredLanguages];
+        for (NSString *language in preferred) {
+            if ([language hasPrefix:@"ko"]) {
+                prefersKorean = YES;
+                break;
+            }
+        }
+        if (!prefersKorean) {
+            NSString *localeID = [[NSLocale currentLocale] localeIdentifier] ?: @"";
+            prefersKorean = [localeID hasPrefix:@"ko"];
+        }
+    });
+    return prefersKorean;
+}
+
+NSString *SpliceKitLocalizedString(NSString *english, NSString *korean) {
+    if (SpliceKit_prefersKorean() && korean.length > 0) return korean;
+    return english ?: @"";
+}
+
 #pragma mark - Startup Diagnostics
 //
 // Track swizzle results, capture crashes, and collect system info so that

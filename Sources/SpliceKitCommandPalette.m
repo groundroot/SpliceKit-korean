@@ -90,6 +90,198 @@ static CGFloat FCPFuzzyScore(NSString *query, NSString *target) {
     return normalized * lengthPenalty;
 }
 
+static NSString *SKP(NSString *english, NSString *korean) {
+    return SpliceKitLocalizedString(english, korean);
+}
+
+static NSString *FCPDisplayCategoryName(NSString *category) {
+    static NSDictionary<NSString *, NSString *> *map = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        map = @{
+            @"Editing": @"편집",
+            @"Navigation": @"이동",
+            @"Playback": @"재생",
+            @"Color": @"색보정",
+            @"Speed": @"속도",
+            @"Markers": @"마커",
+            @"Transitions": @"전환",
+            @"Effects": @"효과",
+            @"Titles": @"타이틀",
+            @"Audio": @"오디오",
+            @"Keyframes": @"키프레임",
+            @"Export": @"내보내기",
+            @"Project": @"프로젝트",
+            @"Clips": @"클립",
+            @"View": @"보기",
+            @"Roles": @"역할",
+            @"Find": @"찾기",
+            @"Window": @"창",
+            @"Options": @"옵션",
+            @"Music": @"음악",
+            @"FlexMusic": @"FlexMusic",
+            @"Montage": @"몽타주",
+            @"Arrange": @"정렬",
+            @"Keywords": @"키워드",
+            @"Captions": @"자막",
+            @"Favorites": @"즐겨찾기",
+            @"Appearance": @"표시"
+        };
+    });
+    return SKP(category, map[category] ?: category);
+}
+
+static NSString *FCPDisplayCommandName(SpliceKitCommand *cmd) {
+    if (!cmd) return @"";
+    static NSDictionary<NSString *, NSString *> *map = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        map = @{
+            @"blade": @"블레이드",
+            @"bladeAll": @"모두 블레이드",
+            @"delete": @"삭제",
+            @"undo": @"실행 취소",
+            @"redo": @"다시 실행",
+            @"playPause": @"재생 / 일시정지",
+            @"goToStart": @"처음으로 이동",
+            @"goToEnd": @"끝으로 이동",
+            @"nextFrame": @"다음 프레임",
+            @"prevFrame": @"이전 프레임",
+            @"addTransition": @"기본 전환 추가",
+            @"browseTransitions": @"전환 찾아보기...",
+            @"browseEffects": @"효과 찾아보기...",
+            @"browseTitles": @"타이틀 찾아보기...",
+            @"toggleInspector": @"인스펙터 표시/숨기기",
+            @"toggleTimelineIndex": @"타임라인 인덱스 표시/숨기기",
+            @"togglePrecisionEditor": @"정밀 편집기 표시/숨기기",
+            @"showKeywordEditor": @"키워드 편집기 열기",
+            @"showVideoAnimation": @"비디오 애니메이션 표시",
+            @"showAudioAnimation": @"오디오 애니메이션 표시",
+            @"showMagneticMaskEditor": @"매그네틱 마스크 편집기 표시",
+            @"find": @"찾기",
+            @"showPreferences": @"환경설정 열기",
+            @"exportXML": @"FCPXML 내보내기",
+            @"newProject": @"새 프로젝트",
+            @"newEvent": @"새 이벤트",
+            @"importMedia": @"미디어 가져오기",
+            @"recordVoiceover": @"보이스오버 녹음",
+            @"backgroundTasks": @"백그라운드 작업",
+            @"removeSilences": @"무음 제거",
+            @"openTranscript": @"텍스트 편집기 열기"
+        };
+    });
+    NSString *translated = cmd.action.length > 0 ? map[cmd.action] : nil;
+    return SKP(cmd.name ?: @"", translated ?: (cmd.name ?: @""));
+}
+
+static BOOL FCPContainsHangul(NSString *text) {
+    for (NSUInteger i = 0; i < text.length; i++) {
+        unichar c = [text characterAtIndex:i];
+        if ((c >= 0x1100 && c <= 0x11FF) || (c >= 0x3130 && c <= 0x318F) || (c >= 0xAC00 && c <= 0xD7AF)) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static NSString *FCPNormalizeCommandQuery(NSString *query) {
+    if (query.length == 0) return @"";
+    NSString *normalized = [query lowercaseString];
+    NSArray<NSArray<NSString *> *> *regexReplacements = @[
+        @[@"(\\d+(?:\\.\\d+)?)\\s*분\\s*(\\d+(?:\\.\\d+)?)\\s*초", @"$1 minutes $2 seconds"],
+        @[@"(\\d+(?:\\.\\d+)?)\\s*초마다", @"every $1 seconds"],
+        @[@"(\\d+(?:\\.\\d+)?)\\s*분마다", @"every $1 minutes"],
+        @[@"(\\d+(?:\\.\\d+)?)\\s*초", @"$1 seconds"],
+        @[@"(\\d+(?:\\.\\d+)?)\\s*분", @"$1 minutes"]
+    ];
+    for (NSArray<NSString *> *pair in regexReplacements) {
+        NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:pair[0] options:NSRegularExpressionCaseInsensitive error:nil];
+        normalized = [regex stringByReplacingMatchesInString:normalized options:0 range:NSMakeRange(0, normalized.length) withTemplate:pair[1]];
+    }
+    NSArray<NSArray<NSString *> *> *replacements = @[
+        @[@"커맨드 팔레트", @"command palette"],
+        @[@"명령 팔레트", @"command palette"],
+        @[@"텍스트 편집기", @"transcript editor"],
+        @[@"트랜스크립트", @"transcript"],
+        @[@"자막 생성", @"generate captions"],
+        @[@"자막", @"captions"],
+        @[@"무음 제거", @"remove silences"],
+        @[@"침묵 제거", @"remove silences"],
+        @[@"장면 전환 감지", @"scene detection"],
+        @[@"장면 감지", @"scene detection"],
+        @[@"크로스 디졸브", @"cross dissolve"],
+        @[@"디졸브", @"dissolve"],
+        @[@"전환", @"transition"],
+        @[@"효과", @"effect"],
+        @[@"흑백", @"black and white"],
+        @[@"블러", @"blur"],
+        @[@"흐리게", @"blur"],
+        @[@"안정화", @"stabilization"],
+        @[@"마커", @"marker"],
+        @[@"되돌리기", @"undo"],
+        @[@"실행 취소", @"undo"],
+        @[@"다시 실행", @"redo"],
+        @[@"재생", @"play"],
+        @[@"일시정지", @"pause"],
+        @[@"정지", @"stop"],
+        @[@"처음", @"start"],
+        @[@"시작", @"start"],
+        @[@"끝", @"end"],
+        @[@"다음 프레임", @"next frame"],
+        @[@"이전 프레임", @"previous frame"],
+        @[@"10프레임", @"10 frame"],
+        @[@"열 프레임", @"10 frame"],
+        @[@"반속", @"half speed"],
+        @[@"절반 속도", @"half speed"],
+        @[@"두 배속", @"2x speed"],
+        @[@"2배속", @"2x speed"],
+        @[@"네 배속", @"4x speed"],
+        @[@"4배속", @"4x speed"],
+        @[@"블레이드", @"blade"],
+        @[@"컷", @"cut"],
+        @[@"자르기", @"cut"],
+        @[@"분할", @"split"],
+        @[@"삭제", @"delete"],
+        @[@"제거", @"remove"],
+        @[@"앞부분", @"first part"],
+        @[@"뒷부분", @"last part"],
+        @[@"검사기", @"inspector"],
+        @[@"인스펙터", @"inspector"],
+        @[@"타임라인 인덱스", @"timeline index"],
+        @[@"키워드 편집기", @"keyword editor"],
+        @[@"정밀 편집기", @"precision editor"],
+        @[@"전체 화면", @"full screen"],
+        @[@"전체화면", @"full screen"],
+        @[@"속도", @"speed"],
+        @[@"절반 속도", @"slow to half"],
+        @[@"반속", @"slow to half"],
+        @[@"느리게", @"slow"],
+        @[@"빠르게", @"fast"],
+        @[@"오디오", @"audio"],
+        @[@"비디오", @"video"],
+        @[@"타이틀", @"title"],
+        @[@"프로젝트", @"project"],
+        @[@"이벤트", @"event"],
+        @[@"가져오기", @"import"],
+        @[@"내보내기", @"export"],
+        @[@"찾기", @"find"],
+        @[@"환경설정", @"preferences"],
+        @[@"설정", @"settings"],
+        @[@"보이스오버", @"voiceover"],
+        @[@"여기서", @"here"],
+        @[@"현재 위치", @"current position"],
+        @[@"현재 재생헤드", @"playhead"],
+        @[@"재생헤드", @"playhead"],
+        @[@"에서", @" at "],
+        @[@"으로", @" to "],
+        @[@"마다", @"every"]
+    ];
+    for (NSArray<NSString *> *pair in replacements) {
+        normalized = [normalized stringByReplacingOccurrencesOfString:pair[0] withString:pair[1]];
+    }
+    return normalized;
+}
+
 static NSColor *FCPPaletteColor(CGFloat r, CGFloat g, CGFloat b, CGFloat a) {
     return [NSColor colorWithSRGBRed:r green:g blue:b alpha:a];
 }
@@ -527,13 +719,13 @@ static void FCPSelectSingleTableRow(NSTableView *tableView, NSInteger row) {
 
 - (void)configureWithCommand:(SpliceKitCommand *)cmd isFavorited:(BOOL)favorited selected:(BOOL)selected {
     NSColor *accent = FCPCommandAccentColor(cmd);
-    self.nameLabel.stringValue = cmd.name ?: @"";
+    self.nameLabel.stringValue = FCPDisplayCommandName(cmd);
     self.detailLabel.stringValue = cmd.detail ?: @"";
-    self.categoryLabel.stringValue = cmd.categoryName.length > 0 ? [cmd.categoryName uppercaseString] : @"";
+    self.categoryLabel.stringValue = cmd.categoryName.length > 0 ? [FCPDisplayCategoryName(cmd.categoryName) uppercaseString] : @"";
     self.shortcutLabel.stringValue = cmd.shortcut ?: @"";
     self.starLabel.stringValue = favorited ? @"★" : @"";
 
-    NSImage *symbol = [NSImage imageWithSystemSymbolName:FCPCommandSymbolName(cmd) accessibilityDescription:cmd.name];
+    NSImage *symbol = [NSImage imageWithSystemSymbolName:FCPCommandSymbolName(cmd) accessibilityDescription:FCPDisplayCommandName(cmd)];
     self.iconView.image = symbol;
     self.iconView.contentTintColor = accent;
     self.iconPlate.layer.backgroundColor = [accent colorWithAlphaComponent:0.10].CGColor;
@@ -721,8 +913,8 @@ static void FCPSelectSingleTableRow(NSTableView *tableView, NSInteger row) {
 
 - (void)configureWithCommand:(SpliceKitCommand *)cmd emphasis:(BOOL)emphasis {
     NSColor *accent = FCPCommandAccentColor(cmd);
-    self.titleLabel.stringValue = cmd.name ?: @"";
-    self.iconView.image = [NSImage imageWithSystemSymbolName:FCPCommandSymbolName(cmd) accessibilityDescription:cmd.name];
+    self.titleLabel.stringValue = FCPDisplayCommandName(cmd);
+    self.iconView.image = [NSImage imageWithSystemSymbolName:FCPCommandSymbolName(cmd) accessibilityDescription:FCPDisplayCommandName(cmd)];
     self.iconView.contentTintColor = accent;
     self.iconPlate.layer.backgroundColor = [accent colorWithAlphaComponent:emphasis ? 0.16 : 0.10].CGColor;
     self.iconPlate.layer.borderWidth = 1.0;
@@ -1535,7 +1727,7 @@ static NSString * const kSeparatorRowID = @"FCPSeparatorRow";
     SpliceKitCommandPalettePanel *panel = [[SpliceKitCommandPalettePanel alloc] initWithContentRect:frame
         styleMask:(NSWindowStyleMaskBorderless | NSWindowStyleMaskFullSizeContentView)
         backing:NSBackingStoreBuffered defer:NO];
-    panel.title = @"SpliceKit Command Palette";
+    panel.title = SKP(@"SpliceKit Command Palette", @"SpliceKit 명령 팔레트");
     panel.opaque = NO;
     panel.movableByWindowBackground = YES;
     panel.level = NSFloatingWindowLevel;
@@ -1651,7 +1843,7 @@ static NSString * const kSeparatorRowID = @"FCPSeparatorRow";
     self.orbView = orbView;
 
     SpliceKitCommandSearchField *searchField = [[SpliceKitCommandSearchField alloc] initWithFrame:NSZeroRect];
-    searchField.placeholderAttributedString = [[NSAttributedString alloc] initWithString:@"Ask SpliceKit or type a command"
+    searchField.placeholderAttributedString = [[NSAttributedString alloc] initWithString:SKP(@"Ask SpliceKit or type a command", @"SpliceKit에 요청하거나 명령을 입력하세요")
                                                                               attributes:@{
         NSForegroundColorAttributeName: FCPPaletteColor(0.92, 0.95, 1.0, 0.42),
         NSFontAttributeName: [NSFont systemFontOfSize:20 weight:NSFontWeightSemibold]
@@ -1680,7 +1872,7 @@ static NSString * const kSeparatorRowID = @"FCPSeparatorRow";
     dictationButton.layer.backgroundColor = FCPPaletteColor(1.0, 1.0, 1.0, 0.03).CGColor;
     dictationButton.layer.borderWidth = 1.0;
     dictationButton.layer.borderColor = FCPPaletteColor(1.0, 1.0, 1.0, 0.12).CGColor;
-    dictationButton.toolTip = @"Start Siri-style voice dictation";
+    dictationButton.toolTip = SKP(@"Start Siri-style voice dictation", @"Siri 스타일 음성 입력 시작");
     [searchChrome addSubview:dictationButton];
     self.dictationButton = dictationButton;
 
@@ -1773,7 +1965,11 @@ static NSString * const kSeparatorRowID = @"FCPSeparatorRow";
 
     NSPopUpButton *aiPopup = [[NSPopUpButton alloc] init];
     aiPopup.translatesAutoresizingMaskIntoConstraints = NO;
-    [aiPopup addItemsWithTitles:@[@"Apple Intelligence", @"Gemma 4", @"Apple Intelligence+"]];
+    [aiPopup addItemsWithTitles:@[
+        SKP(@"Apple Intelligence", @"Apple Intelligence"),
+        @"Gemma 4",
+        SKP(@"Apple Intelligence+", @"Apple Intelligence+")
+    ]];
     aiPopup.target = self;
     aiPopup.action = @selector(aiEngineChanged:);
     aiPopup.font = [NSFont systemFontOfSize:10];
@@ -2545,7 +2741,8 @@ static NSString *FCPStripStopWords(NSString *query) {
         stopWords = [NSSet setWithObjects:
             @"the", @"a", @"an", @"my", @"this", @"that", @"please",
             @"can", @"you", @"i", @"me", @"it", @"its", @"with",
-            @"for", @"on", @"of", @"is", @"and", @"or", nil];
+            @"for", @"on", @"of", @"is", @"and", @"or",
+            @"좀", @"제발", @"이거", @"그거", @"해주세요", @"해줘", @"해", @"를", @"을", @"에", @"에서", nil];
     });
     NSMutableArray *words = [[query componentsSeparatedByString:@" "] mutableCopy];
     NSMutableArray *filtered = [NSMutableArray array];
@@ -2560,26 +2757,26 @@ static NSString *FCPStripStopWords(NSString *query) {
 - (NSArray<SpliceKitCommand *> *)searchCommands:(NSString *)query {
     if (query.length == 0) return self.allCommands;
 
-    // Try both raw query and stop-word-stripped version
-    NSString *cleaned = FCPStripStopWords(query);
-    BOOL hasCleaned = ![cleaned isEqualToString:query];
+    NSString *normalizedQuery = FCPNormalizeCommandQuery(query);
+    NSString *cleaned = FCPStripStopWords(normalizedQuery);
+    BOOL hasCleaned = ![cleaned isEqualToString:normalizedQuery];
 
     NSMutableArray<SpliceKitCommand *> *results = [NSMutableArray array];
     for (SpliceKitCommand *cmd in self.allCommands) {
         // Score against name
-        CGFloat nameScore = FCPFuzzyScore(query, cmd.name);
+        CGFloat nameScore = FCPFuzzyScore(normalizedQuery, cmd.name);
         if (hasCleaned) nameScore = MAX(nameScore, FCPFuzzyScore(cleaned, cmd.name));
         // Score against keywords
         CGFloat keywordScore = 0;
         for (NSString *kw in cmd.keywords) {
-            CGFloat s = FCPFuzzyScore(query, kw);
+            CGFloat s = FCPFuzzyScore(normalizedQuery, kw);
             if (hasCleaned) s = MAX(s, FCPFuzzyScore(cleaned, kw));
             if (s > keywordScore) keywordScore = s;
         }
         // Score against category
-        CGFloat catScore = FCPFuzzyScore(query, cmd.categoryName) * 0.5;
+        CGFloat catScore = FCPFuzzyScore(normalizedQuery, cmd.categoryName) * 0.5;
         // Score against detail
-        CGFloat detailScore = FCPFuzzyScore(query, cmd.detail) * 0.3;
+        CGFloat detailScore = FCPFuzzyScore(normalizedQuery, cmd.detail) * 0.3;
 
         CGFloat best = MAX(MAX(nameScore, keywordScore), MAX(catScore, detailScore));
         if (best > 0.2) {
@@ -4241,7 +4438,7 @@ static NSString *FCPFavoriteKey(NSString *type, NSString *action) {
     self.rawBrowseCommands = nil;
     self.allCommands = self.masterCommands;
     self.searchField.stringValue = @"";
-    self.searchField.placeholderString = @"Type a command or describe what you want to do...";
+    self.searchField.placeholderString = SKP(@"Type a command or describe what you want to do...", @"명령을 입력하거나 원하는 작업을 자연어로 설명하세요...");
     self.filteredCommands = self.allCommands;
     [self.tableView reloadData];
     [self updateStatusLabel];
@@ -4546,8 +4743,10 @@ static NSString *FCPFavoriteKey(NSString *type, NSString *action) {
         @"effect", @"effects", @"filter", @"transition", @"transitions",
         @"clip", @"video", @"audio", @"please", @"want", @"need", @"like",
         @"i", @"me", @"can", @"you",
+        @"좀", @"제발", @"해주세요", @"해줘", @"효과", @"전환", @"클립", @"비디오", @"오디오",
     ]];
-    NSArray *words = [[query lowercaseString] componentsSeparatedByCharactersInSet:
+    NSString *normalized = FCPNormalizeCommandQuery(query);
+    NSArray *words = [[normalized lowercaseString] componentsSeparatedByCharactersInSet:
                       [NSCharacterSet whitespaceAndNewlineCharacterSet]];
     NSMutableArray *keywords = [NSMutableArray array];
     for (NSString *word in words) {
@@ -4724,7 +4923,8 @@ static NSString *FCPFavoriteKey(NSString *type, NSString *action) {
     [self updateHeroStageAnimated:YES];
 
     // Intercept repetitive patterns (all engines) — models can't reliably loop 40+ times
-    if ([self handleRepeatPatternIfNeeded:query completion:^(NSString *summary, NSString *error) {
+    NSString *normalizedQuery = FCPNormalizeCommandQuery(query);
+    if ([self handleRepeatPatternIfNeeded:normalizedQuery completion:^(NSString *summary, NSString *error) {
         self.aiLoading = NO;
         if (error) {
             self.aiError = error;
@@ -4794,7 +4994,7 @@ static NSString *FCPFavoriteKey(NSString *type, NSString *action) {
 
     // Detect question-type queries that Apple Intelligence can't answer
     // (it can only return actions, not information)
-    NSString *lowerQuery = [query lowercaseString];
+    NSString *lowerQuery = [FCPNormalizeCommandQuery(query) lowercaseString];
     BOOL isQuestion = [lowerQuery hasSuffix:@"?"] ||
         [lowerQuery hasPrefix:@"how "] || [lowerQuery hasPrefix:@"what "] ||
         [lowerQuery hasPrefix:@"which "] || [lowerQuery hasPrefix:@"where "] ||
@@ -5405,6 +5605,9 @@ static NSString *FCPFavoriteKey(NSString *type, NSString *action) {
     // Escape the query for embedding in Swift string
     NSString *escaped = [[query stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"]
                           stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+    NSString *normalizedQuery = FCPNormalizeCommandQuery(query);
+    NSString *escapedNormalized = [[normalizedQuery stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"]
+                                   stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
 
     // Build timeline context string for the prompt
     NSString *timelineInfo = @"No timeline info available.";
@@ -5426,6 +5629,7 @@ static NSString *FCPFavoriteKey(NSString *type, NSString *action) {
         "import FoundationModels\n"
         "\n"
         "let query = \"%@\"\n"
+        "let normalizedQuery = \"%@\"\n"
         "let timelineContext = \"%@\"\n"
         "\n"
         "let instructions = \"\"\"\n"
@@ -5512,7 +5716,9 @@ static NSString *FCPFavoriteKey(NSString *type, NSString *action) {
         "- \\\"full screen\\\" -> [{\\\"type\\\":\\\"timeline\\\",\\\"action\\\":\\\"enterFullScreen\\\"}]\n"
         "\"\"\"\n"
         "\n"
-        "let fullQuery = \"\\(timelineContext)\\n\\nUser request: \\(query)\"\n"
+        "let fullQuery = normalizedQuery == query\n"
+        "    ? \"\\(timelineContext)\\n\\nUser request: \\(query)\"\n"
+        "    : \"\\(timelineContext)\\n\\nUser request: \\(query)\\nNormalized English intent: \\(normalizedQuery)\"\n"
         "\n"
         "Task {\n"
         "    guard SystemLanguageModel.default.availability == .available else {\n"
@@ -5534,13 +5740,13 @@ static NSString *FCPFavoriteKey(NSString *type, NSString *action) {
         "}\n"
         "\n"
         "dispatchMain()\n",
-        escaped, escapedCtx];
+        escaped, escapedNormalized, escapedCtx];
 }
 
 #pragma mark - Keyword Fallback (when AI unavailable)
 
 - (NSArray<NSDictionary *> *)keywordFallback:(NSString *)query {
-    NSString *q = [query lowercaseString];
+    NSString *q = [[FCPNormalizeCommandQuery(query) lowercaseString] copy];
     NSMutableArray *actions = [NSMutableArray array];
 
     // ── Undo / Redo ──
@@ -7039,13 +7245,14 @@ static NSString * const kGemmaSystemPrompt =
 
 - (void)executeNaturalLanguageGemma:(NSString *)query
                          completion:(void(^)(NSString *summary, NSString *error))completion {
+    NSString *normalizedQuery = FCPNormalizeCommandQuery(query);
 
     // Check for repeat pattern first (faster than multi-turn LLM loop)
-    if ([self handleRepeatPatternIfNeeded:query completion:completion]) return;
+    if ([self handleRepeatPatternIfNeeded:normalizedQuery completion:completion]) return;
 
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSDate *totalStart = [NSDate date];
-        SpliceKit_log(@"[Gemma] ═══ Starting query: \"%@\" ═══", query);
+        SpliceKit_log(@"[Gemma] ═══ Starting query: \"%@\" | normalized=\"%@\" ═══", query, normalizedQuery);
 
         // 1. Check MLX server availability — auto-start if not running
         [self updateGemmaStatus:@"Connecting to MLX server..."];
@@ -7087,7 +7294,9 @@ static NSString * const kGemmaSystemPrompt =
         // 4. Init conversation
         self.gemmaMessages = [NSMutableArray arrayWithArray:@[
             @{@"role": @"system", @"content": systemMsg},
-            @{@"role": @"user", @"content": query}
+            @{@"role": @"user", @"content": [normalizedQuery isEqualToString:query]
+                                        ? query
+                                        : [NSString stringWithFormat:@"Original request: %@\nNormalized English intent: %@", query, normalizedQuery]}
         ]];
         self.gemmaIterationCount = 0;
         self.gemmaCancelled = NO;
@@ -7233,6 +7442,9 @@ static NSString * const kGemmaSystemPrompt =
 - (NSString *)buildAgenticSwiftScript:(NSString *)query timelineContext:(NSDictionary *)ctx {
     NSString *escaped = [[query stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"]
                           stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+    NSString *normalizedQuery = FCPNormalizeCommandQuery(query);
+    NSString *escapedNormalized = [[normalizedQuery stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"]
+                                   stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
 
     NSString *timelineInfo = @"No timeline info available.";
     if (ctx) {
@@ -7253,6 +7465,9 @@ static NSString * const kGemmaSystemPrompt =
     return [NSString stringWithFormat:@
         "import Foundation\n"
         "import FoundationModels\n"
+        "\n"
+        "let query = \"%@\"\n"
+        "let normalizedQuery = \"%@\"\n"
         "\n"
         "func bridge(_ method: String, _ params: [String: Any] = [:]) -> String {\n"
         "    let req: [String: Any] = [\"jsonrpc\":\"2.0\",\"id\":1,\"method\":method,\"params\":params]\n"
@@ -7413,7 +7628,8 @@ static NSString * const kGemmaSystemPrompt =
         "    do {\n"
         "        let s = LanguageModelSession(tools: [Act(), Seek(), Clips(), Repeat(), Fx(), Menu(), ImportURL()],\n"
         "            instructions: \"You control Final Cut Pro via tools. %@ cut/split means blade NOT delete. For repeating actions at intervals use repeat_action. If the request includes a media URL, use import_url. Always prefer edit tool over menu. Summarize what you did.\")\n"
-        "        let r = try await s.respond(to: \"%@\")\n"
+        "        let prompt = normalizedQuery == query ? query : \"Original request: \\(query)\\nNormalized English intent: \\(normalizedQuery)\"\n"
+        "        let r = try await s.respond(to: prompt)\n"
         "        print(r.content ?? \"Done.\")\n"
         "    } catch LanguageModelSession.GenerationError.exceededContextWindowSize {\n"
         "        print(\"Error: Context too large\")\n"
@@ -7421,7 +7637,7 @@ static NSString * const kGemmaSystemPrompt =
         "    exit(0)\n"
         "}\n"
         "dispatchMain()\n",
-        escapedCtx, escaped];
+        escaped, escapedNormalized, escapedCtx];
 }
 
 // Shared repeat pattern handler — returns YES if the pattern was detected and handled
@@ -7487,12 +7703,13 @@ static NSString * const kGemmaSystemPrompt =
 
 - (void)executeNaturalLanguageAppleAgentic:(NSString *)query
                                 completion:(void(^)(NSString *summary, NSString *error))completion {
+    NSString *normalizedQuery = FCPNormalizeCommandQuery(query);
 
     // Check for repeat pattern first (model can't reliably loop)
-    if ([self handleRepeatPatternIfNeeded:query completion:completion]) return;
+    if ([self handleRepeatPatternIfNeeded:normalizedQuery completion:completion]) return;
 
     NSDate *totalStart = [NSDate date];
-    SpliceKit_log(@"[AppleAI+] ═══ Starting query: \"%@\" ═══", query);
+    SpliceKit_log(@"[AppleAI+] ═══ Starting query: \"%@\" | normalized=\"%@\" ═══", query, normalizedQuery);
 
     // Get timeline context
     NSDate *phaseStart = [NSDate date];

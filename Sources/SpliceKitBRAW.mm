@@ -5610,6 +5610,10 @@ SPLICEKIT_BRAW_EXTERN_C NSString *SpliceKitBRAWResolveOriginalPathForPublic(NSSt
 SPLICEKIT_BRAW_EXTERN_C void SpliceKit_installBRAWProviderShim(void) {
 }
 
+SPLICEKIT_BRAW_EXTERN_C void SpliceKit_bootstrapBRAWAtLaunchPhase(NSString *phase) {
+    (void)phase;
+}
+
 SPLICEKIT_BRAW_EXTERN_C BOOL SpliceKit_installBRAWUTITypeConformanceHook(void) {
     return NO;
 }
@@ -5619,6 +5623,13 @@ SPLICEKIT_BRAW_EXTERN_C BOOL SpliceKit_installBRAWAVURLAssetMIMEHook(void) {
 }
 
 SPLICEKIT_BRAW_EXTERN_C NSDictionary *SpliceKit_handleBRAWProviderProbe(NSDictionary *params) {
+    (void)params;
+    return @{
+        @"error": @"Blackmagic RAW SDK headers are not available at /Applications/Blackmagic RAW/Blackmagic RAW SDK/Mac/Include/BlackmagicRawAPI.h",
+    };
+}
+
+SPLICEKIT_BRAW_EXTERN_C NSDictionary *SpliceKit_handleBRAWAVProbe(NSDictionary *params) {
     (void)params;
     return @{
         @"error": @"Blackmagic RAW SDK headers are not available at /Applications/Blackmagic RAW/Blackmagic RAW SDK/Mac/Include/BlackmagicRawAPI.h",

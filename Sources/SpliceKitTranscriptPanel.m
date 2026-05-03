@@ -61,6 +61,24 @@ static BOOL SpliceKitTranscript_isSpeakerDiarizationAvailable(void) {
     return v.majorVersion >= 26;
 }
 
+static NSString *SKT(NSString *english, NSString *korean) {
+    return SpliceKitLocalizedString(english, korean);
+}
+
+static NSString * const SpliceKitTranscriptLanguageDefaultsKey = @"SpliceKitTranscriptLanguage";
+
+static NSString *SpliceKitTranscriptLocalizedLanguageName(NSString *identifier) {
+    if ([identifier isEqualToString:@"ko-KR"]) return SKT(@"Korean", @"한국어");
+    if ([identifier isEqualToString:@"en-US"]) return SKT(@"English", @"영어");
+    return SKT(@"Auto", @"자동");
+}
+
+static NSString *SpliceKitTranscriptNormalizeLocaleIdentifier(NSString *identifier) {
+    if ([identifier hasPrefix:@"ko"]) return @"ko-KR";
+    if ([identifier hasPrefix:@"en"]) return @"en-US";
+    return identifier ?: @"en-US";
+}
+
 #pragma mark - Timecode Formatting
 
 static NSString *SpliceKitTranscript_timecodeFromSeconds(double seconds, double fps) {
@@ -467,6 +485,7 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
 
 // Options menu
 @property (nonatomic, strong) NSPopUpButton *enginePopup;
+@property (nonatomic, strong) NSPopUpButton *languagePopup;
 // parakeetModelVersion is declared in the public header so the transcript.setEngine RPC can set it.
 
 // Speaker diarization (macOS 26+)
@@ -477,6 +496,7 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
 @property (nonatomic) double frameRate;
 @property (nonatomic) BOOL suppressPersistenceWrites;
 @property (nonatomic, copy) NSString *lastRestoredSequenceKey;
+@property (nonatomic, copy) NSString *transcriptionLanguageIdentifier; // auto, ko-KR, en-US
 @end
 
 @implementation SpliceKitTranscriptPanel
@@ -506,6 +526,7 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
         _frameRate = 24.0;
         _engine = SpliceKitTranscriptEngineParakeet; // Default to Parakeet (fastest, most accurate)
         _parakeetModelVersion = @"v3"; // v3 = multilingual, v2 = English-optimized
+        _transcriptionLanguageIdentifier = [[[NSUserDefaults standardUserDefaults] stringForKey:SpliceKitTranscriptLanguageDefaultsKey] copy] ?: @"auto";
         _lastPlayheadHighlightRange = NSMakeRange(NSNotFound, 0);
 
         [[NSNotificationCenter defaultCenter]
@@ -534,7 +555,7 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
                                             styleMask:styleMask
                                               backing:NSBackingStoreBuffered
                                                 defer:NO];
-    self.panel.title = @"Transcript Editor";
+    self.panel.title = SKT(@"Transcript Editor", @"텍스트 편집기");
     self.panel.floatingPanel = YES;
     self.panel.becomesKeyOnlyIfNeeded = NO;
     self.panel.hidesOnDeactivate = NO;
@@ -557,7 +578,7 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
     // Search field
     self.searchField = [[NSSearchField alloc] init];
     self.searchField.translatesAutoresizingMaskIntoConstraints = NO;
-    self.searchField.placeholderString = @"Search transcript...";
+    self.searchField.placeholderString = SKT(@"Search transcript...", @"트랜스크립트 검색...");
     self.searchField.delegate = self;
     self.searchField.sendsSearchStringImmediately = YES;
     self.searchField.sendsWholeSearchString = NO;
@@ -566,7 +587,12 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
     // Filter popup
     self.filterPopup = [[NSPopUpButton alloc] init];
     self.filterPopup.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.filterPopup addItemsWithTitles:@[@"All", @"Pauses", @"Low Confidence"]];
+    [self.filterPopup addItemWithTitle:SKT(@"All", @"전체")];
+    self.filterPopup.lastItem.representedObject = @"all";
+    [self.filterPopup addItemWithTitle:SKT(@"Pauses", @"무음")];
+    self.filterPopup.lastItem.representedObject = @"pauses";
+    [self.filterPopup addItemWithTitle:SKT(@"Low Confidence", @"낮은 신뢰도")];
+    self.filterPopup.lastItem.representedObject = @"lowConfidence";
     self.filterPopup.target = self;
     self.filterPopup.action = @selector(filterChanged:);
     [self.filterPopup setContentHuggingPriority:NSLayoutPriorityDefaultHigh forOrientation:NSLayoutConstraintOrientationHorizontal];
@@ -575,7 +601,14 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
     // Engine selector
     self.enginePopup = [[NSPopUpButton alloc] init];
     self.enginePopup.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.enginePopup addItemsWithTitles:@[@"FCP Native", @"Apple Speech", @"Parakeet v3", @"Parakeet v2"]];
+    [self.enginePopup addItemWithTitle:SKT(@"FCP Native", @"FCP 기본 전사")];
+    self.enginePopup.lastItem.representedObject = @"fcpNative";
+    [self.enginePopup addItemWithTitle:SKT(@"Apple Speech", @"Apple 음성 인식")];
+    self.enginePopup.lastItem.representedObject = @"appleSpeech";
+    [self.enginePopup addItemWithTitle:@"Parakeet v3"];
+    self.enginePopup.lastItem.representedObject = @"parakeetV3";
+    [self.enginePopup addItemWithTitle:@"Parakeet v2"];
+    self.enginePopup.lastItem.representedObject = @"parakeetV2";
     self.enginePopup.target = self;
     self.enginePopup.action = @selector(engineChanged:);
     self.enginePopup.font = [NSFont systemFontOfSize:11];
@@ -584,8 +617,26 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
     [self.enginePopup selectItemAtIndex:2]; // Default to Parakeet v3
     [row1 addSubview:self.enginePopup];
 
+    // Language selector
+    self.languagePopup = [[NSPopUpButton alloc] init];
+    self.languagePopup.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.languagePopup addItemWithTitle:SpliceKitTranscriptLocalizedLanguageName(@"auto")];
+    self.languagePopup.lastItem.representedObject = @"auto";
+    [self.languagePopup addItemWithTitle:SpliceKitTranscriptLocalizedLanguageName(@"ko-KR")];
+    self.languagePopup.lastItem.representedObject = @"ko-KR";
+    [self.languagePopup addItemWithTitle:SpliceKitTranscriptLocalizedLanguageName(@"en-US")];
+    self.languagePopup.lastItem.representedObject = @"en-US";
+    self.languagePopup.target = self;
+    self.languagePopup.action = @selector(languageChanged:);
+    self.languagePopup.font = [NSFont systemFontOfSize:11];
+    self.languagePopup.controlSize = NSControlSizeSmall;
+    [self.languagePopup setContentHuggingPriority:NSLayoutPriorityDefaultHigh forOrientation:NSLayoutConstraintOrientationHorizontal];
+    self.languagePopup.toolTip = SKT(@"Transcription language. Auto uses your system language; Apple Speech and FCP Native follow this setting.", @"전사 언어입니다. 자동은 시스템 언어를 사용하며 Apple Speech와 FCP 기본 전사가 이 설정을 따릅니다.");
+    [self syncLanguagePopupSelection];
+    [row1 addSubview:self.languagePopup];
+
     // Speaker detection checkbox
-    self.speakerDetectionCheckbox = [NSButton checkboxWithTitle:@"Speakers"
+    self.speakerDetectionCheckbox = [NSButton checkboxWithTitle:SKT(@"Speakers", @"화자 구분")
                                                         target:self
                                                         action:@selector(speakerDetectionToggled:)];
     self.speakerDetectionCheckbox.translatesAutoresizingMaskIntoConstraints = NO;
@@ -597,7 +648,7 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
     [self updateSpeakerCheckboxState];
 
     // Transcribe button
-    self.refreshButton = [NSButton buttonWithTitle:@"Transcribe"
+    self.refreshButton = [NSButton buttonWithTitle:SKT(@"Transcribe", @"전사")
                                             target:self
                                             action:@selector(refreshClicked:)];
     self.refreshButton.translatesAutoresizingMaskIntoConstraints = NO;
@@ -611,19 +662,19 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
     [content addSubview:row2];
 
     // Delete results button
-    self.deleteResultsButton = [NSButton buttonWithTitle:@"Delete"
+    self.deleteResultsButton = [NSButton buttonWithTitle:SKT(@"Delete", @"삭제")
                                                   target:self
                                                   action:@selector(deleteResultsClicked:)];
     self.deleteResultsButton.translatesAutoresizingMaskIntoConstraints = NO;
     self.deleteResultsButton.bezelStyle = NSBezelStyleRounded;
-    self.deleteResultsButton.image = [NSImage imageWithSystemSymbolName:@"trash" accessibilityDescription:@"Delete"];
+    self.deleteResultsButton.image = [NSImage imageWithSystemSymbolName:@"trash" accessibilityDescription:SKT(@"Delete", @"삭제")];
     self.deleteResultsButton.imagePosition = NSImageLeading;
     self.deleteResultsButton.enabled = NO;
     [self.deleteResultsButton setContentHuggingPriority:NSLayoutPriorityDefaultHigh forOrientation:NSLayoutConstraintOrientationHorizontal];
     [row2 addSubview:self.deleteResultsButton];
 
     // Delete silences button
-    self.deleteSilencesButton = [NSButton buttonWithTitle:@"Delete Silences"
+    self.deleteSilencesButton = [NSButton buttonWithTitle:SKT(@"Delete Silences", @"무음 삭제")
                                                    target:self
                                                    action:@selector(deleteSilencesClicked:)];
     self.deleteSilencesButton.translatesAutoresizingMaskIntoConstraints = NO;
@@ -633,7 +684,7 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
     [row2 addSubview:self.deleteSilencesButton];
 
     // Status label + spinner
-    self.statusLabel = [NSTextField labelWithString:@"Ready"];
+    self.statusLabel = [NSTextField labelWithString:SKT(@"Ready", @"준비됨")];
     self.statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
     self.statusLabel.font = [NSFont systemFontOfSize:11];
     self.statusLabel.textColor = [NSColor secondaryLabelColor];
@@ -658,7 +709,7 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
     [row2 addSubview:self.resultCountLabel];
 
     // Prev/Next buttons
-    self.prevResultButton = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"chevron.up" accessibilityDescription:@"Previous"]
+    self.prevResultButton = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"chevron.up" accessibilityDescription:SKT(@"Previous", @"이전")]
                                                target:self
                                                action:@selector(prevResultClicked:)];
     self.prevResultButton.translatesAutoresizingMaskIntoConstraints = NO;
@@ -667,7 +718,7 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
     self.prevResultButton.enabled = NO;
     [row2 addSubview:self.prevResultButton];
 
-    self.nextResultButton = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"chevron.down" accessibilityDescription:@"Next"]
+    self.nextResultButton = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"chevron.down" accessibilityDescription:SKT(@"Next", @"다음")]
                                                target:self
                                                action:@selector(nextResultClicked:)];
     self.nextResultButton.translatesAutoresizingMaskIntoConstraints = NO;
@@ -732,7 +783,8 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
 
     // Instructions text
     NSMutableAttributedString *instructions = [[NSMutableAttributedString alloc]
-        initWithString:@"Transcript Editor\n\nClick \"Transcribe\" to transcribe audio from your timeline clips.\n\nOnce transcribed:\n  \u2022 Click a word to jump the playhead\n  \u2022 Select words and press Delete to remove those segments\n  \u2022 Drag words to reorder clips\n  \u2022 Use Search to find text or filter Pauses\n  \u2022 Click \"Delete Silences\" to batch-remove pauses\n\nSilences are shown as [\u22ef] markers between words."
+        initWithString:SKT(@"Transcript Editor\n\nClick \"Transcribe\" to transcribe audio from your timeline clips.\n\nOnce transcribed:\n  \u2022 Click a word to jump the playhead\n  \u2022 Select words and press Delete to remove those segments\n  \u2022 Drag words to reorder clips\n  \u2022 Use Search to find text or filter Pauses\n  \u2022 Click \"Delete Silences\" to batch-remove pauses\n\nSilences are shown as [\u22ef] markers between words.",
+                       @"텍스트 편집기\n\n\"전사\"를 눌러 타임라인 클립의 오디오를 텍스트로 변환하세요.\n\n전사가 끝나면:\n  \u2022 단어를 클릭해 재생헤드를 이동할 수 있습니다\n  \u2022 단어를 선택하고 Delete를 눌러 해당 구간을 제거할 수 있습니다\n  \u2022 단어를 드래그해 클립 순서를 바꿀 수 있습니다\n  \u2022 검색으로 텍스트를 찾거나 무음만 필터링할 수 있습니다\n  \u2022 \"무음 삭제\"를 눌러 일괄로 공백을 제거할 수 있습니다\n\n무음은 단어 사이의 [\u22ef] 표시로 나타납니다.")
         attributes:@{
             NSFontAttributeName: [NSFont systemFontOfSize:14],
             NSForegroundColorAttributeName: [NSColor secondaryLabelColor]
@@ -758,7 +810,10 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
         [self.enginePopup.leadingAnchor constraintEqualToAnchor:self.filterPopup.trailingAnchor constant:6],
         [self.enginePopup.centerYAnchor constraintEqualToAnchor:row1.centerYAnchor],
 
-        [self.speakerDetectionCheckbox.leadingAnchor constraintEqualToAnchor:self.enginePopup.trailingAnchor constant:6],
+        [self.languagePopup.leadingAnchor constraintEqualToAnchor:self.enginePopup.trailingAnchor constant:6],
+        [self.languagePopup.centerYAnchor constraintEqualToAnchor:row1.centerYAnchor],
+
+        [self.speakerDetectionCheckbox.leadingAnchor constraintEqualToAnchor:self.languagePopup.trailingAnchor constant:6],
         [self.speakerDetectionCheckbox.centerYAnchor constraintEqualToAnchor:row1.centerYAnchor],
 
         [self.refreshButton.leadingAnchor constraintEqualToAnchor:self.speakerDetectionCheckbox.trailingAnchor constant:6],
@@ -942,6 +997,7 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
         @"frameRate": @(self.frameRate),
         @"silenceThreshold": @(self.silenceThreshold),
         @"speakerDetectionEnabled": @(self.speakerDetectionEnabled),
+        @"language": self.transcriptionLanguageIdentifier ?: @"auto",
         @"words": wordDicts,
         @"silences": silenceDicts,
     } mutableCopy];
@@ -1081,6 +1137,11 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
     if ([transcript[@"parakeetModel"] isKindOfClass:[NSString class]]) {
         self.parakeetModelVersion = transcript[@"parakeetModel"];
     }
+    if ([transcript[@"language"] isKindOfClass:[NSString class]]) {
+        self.transcriptionLanguageIdentifier = transcript[@"language"];
+    } else {
+        self.transcriptionLanguageIdentifier = @"auto";
+    }
     if (transcript[@"frameRate"]) self.frameRate = [transcript[@"frameRate"] doubleValue];
     if (transcript[@"silenceThreshold"]) self.silenceThreshold = [transcript[@"silenceThreshold"] doubleValue];
     self.speakerDetectionEnabled = [transcript[@"speakerDetectionEnabled"] boolValue];
@@ -1092,13 +1153,13 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
     if (self.panel) {
         [self updateSpeakerCheckboxState];
         if (self.engine == SpliceKitTranscriptEngineAppleSpeech) {
-            [self.enginePopup selectItemWithTitle:@"Apple Speech"];
+            [self.enginePopup selectItemAtIndex:1];
         } else if (self.engine == SpliceKitTranscriptEngineParakeet) {
-            NSString *title = [self.parakeetModelVersion isEqualToString:@"v2"] ? @"Parakeet v2" : @"Parakeet v3";
-            [self.enginePopup selectItemWithTitle:title];
+            [self.enginePopup selectItemAtIndex:[self.parakeetModelVersion isEqualToString:@"v2"] ? 3 : 2];
         } else {
-            [self.enginePopup selectItemWithTitle:@"FCP Native"];
+            [self.enginePopup selectItemAtIndex:0];
         }
+        [self syncLanguagePopupSelection];
         self.speakerDetectionCheckbox.state = self.speakerDetectionEnabled ? NSControlStateValueOn : NSControlStateValueOff;
         [self rebuildTextView];
         self.deleteSilencesButton.enabled = (self.mutableSilences.count > 0);
@@ -1136,7 +1197,7 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
     if (self.panel) {
         [self rebuildTextView];
         self.deleteSilencesButton.enabled = NO;
-        [self updateStatusUI:@"Transcript cleared."];
+        [self updateStatusUI:SKT(@"Transcript cleared.", @"트랜스크립트를 지웠습니다.")];
     }
 
     SpliceKit_log(@"[Transcript] Transcript cleared");
@@ -1148,14 +1209,51 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
     [self transcribeTimeline];
 }
 
+- (NSString *)effectiveTranscriptionLocaleIdentifier {
+    NSString *selection = self.transcriptionLanguageIdentifier ?: @"auto";
+    if ([selection isEqualToString:@"auto"]) {
+        NSString *currentLocaleID = [[NSLocale currentLocale] localeIdentifier] ?: @"en-US";
+        return SpliceKitTranscriptNormalizeLocaleIdentifier(currentLocaleID);
+    }
+    return SpliceKitTranscriptNormalizeLocaleIdentifier(selection);
+}
+
+- (NSLocale *)effectiveTranscriptionLocale {
+    return [NSLocale localeWithLocaleIdentifier:[self effectiveTranscriptionLocaleIdentifier]];
+}
+
+- (void)syncLanguagePopupSelection {
+    NSString *selection = self.transcriptionLanguageIdentifier ?: @"auto";
+    for (NSMenuItem *item in self.languagePopup.itemArray) {
+        if ([item.representedObject isEqualToString:selection]) {
+            [self.languagePopup selectItem:item];
+            return;
+        }
+    }
+    [self.languagePopup selectItemAtIndex:0];
+}
+
+- (void)enforceTranscriptionLanguageCompatibilityIfNeeded {
+    if (![self.transcriptionLanguageIdentifier isEqualToString:@"ko-KR"]) return;
+    if (self.engine != SpliceKitTranscriptEngineParakeet) return;
+    if (![self.parakeetModelVersion isEqualToString:@"v2"]) return;
+
+    self.parakeetModelVersion = @"v3";
+    if (self.panel) {
+        [self.enginePopup selectItemAtIndex:2];
+        [self updateStatusUI:SKT(@"Switched to Parakeet v3 for Korean transcription.", @"한국어 전사를 위해 Parakeet v3로 전환했습니다.")];
+    }
+    SpliceKit_log(@"[Transcript] Language override is Korean — auto-switched Parakeet v2 to v3");
+}
+
 - (void)engineChanged:(id)sender {
-    NSString *selected = self.enginePopup.titleOfSelectedItem;
-    if ([selected isEqualToString:@"Apple Speech"]) {
+    NSString *selected = self.enginePopup.selectedItem.representedObject ?: @"";
+    if ([selected isEqualToString:@"appleSpeech"]) {
         self.engine = SpliceKitTranscriptEngineAppleSpeech;
         SpliceKit_log(@"[Transcript] Engine switched to Apple Speech (SFSpeechRecognizer)");
-    } else if ([selected hasPrefix:@"Parakeet"]) {
+    } else if ([selected hasPrefix:@"parakeet"]) {
         self.engine = SpliceKitTranscriptEngineParakeet;
-        if ([selected isEqualToString:@"Parakeet v2"]) {
+        if ([selected isEqualToString:@"parakeetV2"]) {
             self.parakeetModelVersion = @"v2";
             SpliceKit_log(@"[Transcript] Engine switched to Parakeet v2 (English-optimized)");
         } else {
@@ -1166,7 +1264,18 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
         self.engine = SpliceKitTranscriptEngineFCPNative;
         SpliceKit_log(@"[Transcript] Engine switched to FCP Native (AASpeechAnalyzer)");
     }
+    [self enforceTranscriptionLanguageCompatibilityIfNeeded];
     [self updateSpeakerCheckboxState];
+}
+
+- (void)languageChanged:(id)sender {
+    self.transcriptionLanguageIdentifier = self.languagePopup.selectedItem.representedObject ?: @"auto";
+    [[NSUserDefaults standardUserDefaults] setObject:self.transcriptionLanguageIdentifier forKey:SpliceKitTranscriptLanguageDefaultsKey];
+    [self enforceTranscriptionLanguageCompatibilityIfNeeded];
+    NSString *localeID = [self effectiveTranscriptionLocaleIdentifier];
+    [self updateStatusUI:[NSString stringWithFormat:SKT(@"Transcription language: %@", @"전사 언어: %@"),
+                          SpliceKitTranscriptLocalizedLanguageName(self.transcriptionLanguageIdentifier)]];
+    SpliceKit_log(@"[Transcript] Language changed to %@ (effective locale=%@)", self.transcriptionLanguageIdentifier, localeID);
 }
 
 - (void)speakerDetectionToggled:(id)sender {
@@ -1184,33 +1293,33 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
         self.speakerDetectionCheckbox.enabled = YES;
         self.speakerDetectionCheckbox.state = NSControlStateValueOn;
         self.speakerDetectionEnabled = YES;
-        self.speakerDetectionCheckbox.toolTip = @"Detect different speakers (FluidAudio diarization)";
+        self.speakerDetectionCheckbox.toolTip = SKT(@"Detect different speakers (FluidAudio diarization)", @"서로 다른 화자를 구분합니다 (FluidAudio 화자 분리)");
     } else if (isAppleSpeech && macOS26) {
         self.speakerDetectionCheckbox.enabled = YES;
         self.speakerDetectionCheckbox.state = NSControlStateValueOn;
         self.speakerDetectionEnabled = YES;
-        self.speakerDetectionCheckbox.toolTip = @"Detect different speakers (macOS 26+)";
+        self.speakerDetectionCheckbox.toolTip = SKT(@"Detect different speakers (macOS 26+)", @"서로 다른 화자를 구분합니다 (macOS 26+)");
     } else if (isAppleSpeech) {
         self.speakerDetectionCheckbox.enabled = NO;
         self.speakerDetectionCheckbox.state = NSControlStateValueOff;
         self.speakerDetectionEnabled = NO;
-        self.speakerDetectionCheckbox.toolTip = @"Speaker detection requires macOS 26 or later";
+        self.speakerDetectionCheckbox.toolTip = SKT(@"Speaker detection requires macOS 26 or later", @"화자 구분은 macOS 26 이상에서 지원됩니다");
     } else {
         // FCP Native: no diarization
         self.speakerDetectionCheckbox.enabled = NO;
         self.speakerDetectionCheckbox.state = NSControlStateValueOff;
         self.speakerDetectionEnabled = NO;
-        self.speakerDetectionCheckbox.toolTip = @"Speaker detection not available with FCP Native engine";
+        self.speakerDetectionCheckbox.toolTip = SKT(@"Speaker detection not available with FCP Native engine", @"FCP 기본 전사 엔진에서는 화자 구분을 사용할 수 없습니다");
     }
 }
 
 - (void)filterChanged:(id)sender {
-    NSString *selected = self.filterPopup.titleOfSelectedItem;
-    if ([selected isEqualToString:@"Pauses"]) {
+    NSString *selected = self.filterPopup.selectedItem.representedObject ?: @"all";
+    if ([selected isEqualToString:@"pauses"]) {
         self.currentFilter = @"pauses";
         self.searchField.stringValue = @"";
         self.currentSearchQuery = @"";
-    } else if ([selected isEqualToString:@"Low Confidence"]) {
+    } else if ([selected isEqualToString:@"lowConfidence"]) {
         self.currentFilter = @"lowConfidence";
         self.searchField.stringValue = @"";
         self.currentSearchQuery = @"";
@@ -1252,13 +1361,13 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
         return [b compare:a];
     }];
 
-    [self updateStatusUI:@"Deleting search results..."];
+    [self updateStatusUI:SKT(@"Deleting search results...", @"검색 결과 삭제 중...")];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         for (NSNumber *idx in wordIndicesToDelete) {
             [self deleteWordsFromIndex:idx.unsignedIntegerValue count:1];
         }
         dispatch_async(dispatch_get_main_queue(), ^{
-            [self updateStatusUI:@"Deleted search results"];
+            [self updateStatusUI:SKT(@"Deleted search results", @"검색 결과를 삭제했습니다")];
         });
     });
 }
@@ -2084,9 +2193,7 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
             return;
         }
 
-        // Get the system language or default to en-US
-        NSString *locale = [[NSLocale currentLocale] languageCode] ?: @"en";
-        NSString *localeID = [[NSLocale currentLocale] localeIdentifier] ?: @"en-US";
+        NSString *localeID = [self effectiveTranscriptionLocaleIdentifier];
 
         SpliceKit_log(@"[Transcript] Calling modalTranscriptsForClips with %lu assets, locale=%@",
                       (unsigned long)assetArray.count, localeID);
@@ -3600,10 +3707,13 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
     SpliceKit_log(@"[Transcript] Transcribing: %@ (timeline:%.2f, trim:%.2f, dur:%.2f)",
                   audioURL.lastPathComponent, timelineStart, trimStart, trimDuration);
 
+    NSString *localeID = [self effectiveTranscriptionLocaleIdentifier];
     id recognizer = ((id (*)(id, SEL, id))objc_msgSend)(
         [SFSpeechRecognizerClass alloc],
         NSSelectorFromString(@"initWithLocale:"),
-        [NSLocale localeWithLocaleIdentifier:@"en-US"]);
+        [NSLocale localeWithLocaleIdentifier:localeID]);
+
+    SpliceKit_log(@"[Transcript] Apple Speech locale=%@", localeID);
 
     if (!recognizer) {
         completion(nil, [NSError errorWithDomain:@"SpliceKitTranscript" code:3
@@ -4149,7 +4259,7 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
     // Text field for new name
     NSTextField *nameField = [[NSTextField alloc] initWithFrame:NSMakeRect(12, 44, 256, 24)];
     nameField.stringValue = currentName;
-    nameField.placeholderString = @"Enter speaker name...";
+    nameField.placeholderString = SKT(@"Enter speaker name...", @"화자 이름 입력...");
     nameField.font = [NSFont systemFontOfSize:13];
     nameField.bezelStyle = NSTextFieldRoundedBezel;
     [nameField selectText:nil];
@@ -4165,7 +4275,7 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
     [contentView addSubview:renameAllCheckbox];
 
     // Apply button
-    NSButton *applyButton = [NSButton buttonWithTitle:@"Rename" target:nil action:nil];
+    NSButton *applyButton = [NSButton buttonWithTitle:SKT(@"Rename", @"이름 바꾸기") target:nil action:nil];
     applyButton.frame = NSMakeRect(214, 8, 56, 28);
     applyButton.bezelStyle = NSBezelStyleRounded;
     applyButton.keyEquivalent = @"\r"; // Enter key
@@ -5093,6 +5203,8 @@ static double CMTimeToSeconds(SpliceKitTranscript_CMTime t) {
     state[@"frameRate"] = @(self.frameRate);
     state[@"engine"] = (self.engine == SpliceKitTranscriptEngineFCPNative) ? @"fcpNative" :
                        (self.engine == SpliceKitTranscriptEngineParakeet) ? @"parakeet" : @"appleSpeech";
+    state[@"language"] = self.transcriptionLanguageIdentifier ?: @"auto";
+    state[@"effectiveLocale"] = [self effectiveTranscriptionLocaleIdentifier];
     if (self.engine == SpliceKitTranscriptEngineParakeet) {
         state[@"parakeetModel"] = self.parakeetModelVersion ?: @"v3";
     }

@@ -2,8 +2,9 @@ CC = clang
 ARCHS = -arch arm64 -arch x86_64
 MIN_VERSION = -mmacosx-version-min=14.0
 FRAMEWORKS = -framework Foundation -framework AppKit -framework AVFoundation -framework Speech -framework CoreServices -framework CoreImage -framework Metal -framework MetalKit -framework QuartzCore -framework Vision
-MODULE_CACHE_DIR = $(BUILD_DIR)/ModuleCache
-OBJC_FLAGS = -fobjc-arc -fmodules -fmodules-cache-path=$(abspath $(MODULE_CACHE_DIR))
+MODULE_CACHE_DIR = $(abspath $(BUILD_DIR))/ModuleCache
+MODULE_CACHE_FLAG = "-fmodules-cache-path=$(MODULE_CACHE_DIR)"
+OBJC_FLAGS = -fobjc-arc -fmodules $(MODULE_CACHE_FLAG)
 OBJCXX_FLAGS = $(OBJC_FLAGS) -std=c++17
 DEBUG_FLAGS = -g
 LINKER_FLAGS = -undefined dynamic_lookup -dynamiclib
@@ -116,7 +117,7 @@ MKV_IMPORT_SOURCES = $(MKV_SOURCE_DIR)/MKVCommon.mm \
 MKV_FRAMEWORKS = -framework Foundation -framework CoreFoundation -framework CoreMedia -framework CoreVideo -framework MediaToolbox -framework AudioToolbox
 # libwebm uses its own exceptions/assert flow; keep default C++ settings but
 # disable ObjC ARC for the .mm so we can freely mix with C++ heap types.
-MKV_CFLAGS = $(ARCHS) $(MIN_VERSION) -fno-objc-arc -fmodules -fmodules-cache-path=$(abspath $(MODULE_CACHE_DIR)) -std=c++17 $(DEBUG_FLAGS) -fvisibility=hidden -Wno-deprecated-declarations -I $(MKV_SOURCE_DIR) -I $(MKV_PRIVATE_DIR) -I $(MKV_LIBWEBM_DIR)
+MKV_CFLAGS = $(ARCHS) $(MIN_VERSION) -fno-objc-arc -fmodules $(MODULE_CACHE_FLAG) -std=c++17 $(DEBUG_FLAGS) -fvisibility=hidden -Wno-deprecated-declarations -I $(MKV_SOURCE_DIR) -I $(MKV_PRIVATE_DIR) -I $(MKV_LIBWEBM_DIR)
 MKV_LDFLAGS = -bundle $(CPP_LIBS)
 
 .PHONY: all clean deploy launch tools url-import-tools audio-bus-probe install-audio-bus-probe uninstall-audio-bus-probe symbols braw-prototype braw-raw-processor vp9-prototype mkv-prototype mcp-setup mcp-doctor

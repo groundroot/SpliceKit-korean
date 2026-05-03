@@ -102,6 +102,30 @@ static NSString *SpliceKitLegacyCaptionStorylineName(void) {
 // Content opacity fade-out: 5 frames before clip end
 static const double kWP_FadeOutDuration = 5.0 / 30.0;
 
+static NSString *SKCaption(NSString *english, NSString *korean) {
+    return SpliceKitLocalizedString(english, korean);
+}
+
+static NSString *SpliceKitCaptionLocalizedLabel(NSString *text) {
+    static NSDictionary<NSString *, NSString *> *map = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        map = @{
+            @"Style": @"스타일",
+            @"Engine": @"엔진",
+            @"Font": @"폰트",
+            @"Size": @"크기",
+            @"Colors": @"색상",
+            @"Outline W.": @"외곽선",
+            @"Shadow Blur": @"그림자 흐림",
+            @"Position": @"위치",
+            @"Animation": @"애니메이션",
+            @"Grouping": @"그룹화",
+        };
+    });
+    return SKCaption(text, map[text] ?: text);
+}
+
 #pragma mark - NSColor RGBA Helpers
 
 static NSString *SpliceKitCaption_colorToFCPXML(NSColor *color) {
@@ -731,7 +755,7 @@ static void SpliceKit_installDragSpy(void) {
                                             styleMask:mask
                                               backing:NSBackingStoreBuffered
                                                 defer:NO];
-    self.panel.title = @"Social Captions";
+    self.panel.title = SKCaption(@"Social Captions", @"소셜 자막");
     self.panel.floatingPanel = YES;
     self.panel.becomesKeyOnlyIfNeeded = NO;
     self.panel.hidesOnDeactivate = NO;
@@ -768,7 +792,7 @@ static void SpliceKit_installDragSpy(void) {
     statusBar.translatesAutoresizingMaskIntoConstraints = NO;
     [content addSubview:statusBar];
 
-    self.statusLabel = [NSTextField labelWithString:@"Ready — choose a style and transcribe"];
+    self.statusLabel = [NSTextField labelWithString:SKCaption(@"Ready — choose a style and transcribe", @"준비됨 — 스타일을 고르고 전사를 시작하세요")];
     self.statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
     self.statusLabel.font = [NSFont systemFontOfSize:11];
     self.statusLabel.textColor = [NSColor secondaryLabelColor];
@@ -840,11 +864,11 @@ static void SpliceKit_installDragSpy(void) {
     self.enginePopup = [[NSPopUpButton alloc] init];
     self.enginePopup.translatesAutoresizingMaskIntoConstraints = NO;
     self.enginePopup.controlSize = NSControlSizeRegular;
-    [self.enginePopup addItemWithTitle:@"Parakeet v3 (Fast, ~475 MB)"];
+    [self.enginePopup addItemWithTitle:SKCaption(@"Parakeet v3 (Fast, ~475 MB)", @"Parakeet v3 (빠름, 약 475MB)")];
     self.enginePopup.lastItem.representedObject = @"parakeetV3";
-    [self.enginePopup addItemWithTitle:@"Whisper large-v3-turbo (~800 MB)"];
+    [self.enginePopup addItemWithTitle:SKCaption(@"Whisper large-v3-turbo (~800 MB)", @"Whisper large-v3-turbo (약 800MB)")];
     self.enginePopup.lastItem.representedObject = @"whisperLargeV3Turbo";
-    [self.enginePopup addItemWithTitle:@"Whisper large-v3 (Highest quality, ~1.5 GB)"];
+    [self.enginePopup addItemWithTitle:SKCaption(@"Whisper large-v3 (Highest quality, ~1.5 GB)", @"Whisper large-v3 (최고 품질, 약 1.5GB)")];
     self.enginePopup.lastItem.representedObject = @"whisperLargeV3";
     NSString *savedEngine = [[NSUserDefaults standardUserDefaults] stringForKey:@"SpliceKitCaptionEngine"] ?: @"whisperLargeV3";
     for (NSMenuItem *item in self.enginePopup.itemArray) {
@@ -1021,7 +1045,11 @@ static void SpliceKit_installDragSpy(void) {
     self.positionPopup = [[NSPopUpButton alloc] init];
     self.positionPopup.translatesAutoresizingMaskIntoConstraints = NO;
     self.positionPopup.controlSize = NSControlSizeSmall;
-    [self.positionPopup addItemsWithTitles:@[@"Bottom", @"Center", @"Top"]];
+    [self.positionPopup addItemsWithTitles:@[
+        SKCaption(@"Bottom", @"하단"),
+        SKCaption(@"Center", @"중앙"),
+        SKCaption(@"Top", @"상단")
+    ]];
     self.positionPopup.target = self; self.positionPopup.action = @selector(positionChanged:);
     [docView addSubview:self.positionPopup];
     [self layoutRow:posLabel control:self.positionPopup in:docView below:prev pad:pad rowH:rowH];
@@ -1033,7 +1061,14 @@ static void SpliceKit_installDragSpy(void) {
     self.animationPopup = [[NSPopUpButton alloc] init];
     self.animationPopup.translatesAutoresizingMaskIntoConstraints = NO;
     self.animationPopup.controlSize = NSControlSizeSmall;
-    [self.animationPopup addItemsWithTitles:@[@"None", @"Fade", @"Pop", @"Slide Up", @"Typewriter", @"Bounce"]];
+    [self.animationPopup addItemsWithTitles:@[
+        SKCaption(@"None", @"없음"),
+        SKCaption(@"Fade", @"페이드"),
+        SKCaption(@"Pop", @"팝"),
+        SKCaption(@"Slide Up", @"위로 슬라이드"),
+        SKCaption(@"Typewriter", @"타자기"),
+        SKCaption(@"Bounce", @"바운스")
+    ]];
     self.animationPopup.target = self; self.animationPopup.action = @selector(animationChanged:);
     [docView addSubview:self.animationPopup];
     [self layoutRow:animLabel control:self.animationPopup in:docView below:prev pad:pad rowH:rowH];
@@ -1075,7 +1110,12 @@ static void SpliceKit_installDragSpy(void) {
     self.groupingPopup = [[NSPopUpButton alloc] init];
     self.groupingPopup.translatesAutoresizingMaskIntoConstraints = NO;
     self.groupingPopup.controlSize = NSControlSizeSmall;
-    [self.groupingPopup addItemsWithTitles:@[@"By Words", @"By Sentence", @"By Time", @"By Characters"]];
+    [self.groupingPopup addItemsWithTitles:@[
+        SKCaption(@"By Words", @"단어별"),
+        SKCaption(@"By Sentence", @"문장별"),
+        SKCaption(@"By Time", @"시간별"),
+        SKCaption(@"By Characters", @"글자 수 기준")
+    ]];
     self.groupingPopup.target = self; self.groupingPopup.action = @selector(groupingChanged:);
     [docView addSubview:self.groupingPopup];
 
@@ -1116,12 +1156,12 @@ static void SpliceKit_installDragSpy(void) {
     prev = sep2;
 
     // === ACTION BUTTONS ===
-    self.transcribeButton = [NSButton buttonWithTitle:@"Transcribe" target:self action:@selector(transcribeClicked:)];
+    self.transcribeButton = [NSButton buttonWithTitle:SKCaption(@"Transcribe", @"전사") target:self action:@selector(transcribeClicked:)];
     self.transcribeButton.translatesAutoresizingMaskIntoConstraints = NO;
     self.transcribeButton.bezelStyle = NSBezelStyleRounded;
     [docView addSubview:self.transcribeButton];
 
-    self.generateButton = [NSButton buttonWithTitle:@"Generate Captions" target:self action:@selector(generateClicked:)];
+    self.generateButton = [NSButton buttonWithTitle:SKCaption(@"Generate Captions", @"자막 생성") target:self action:@selector(generateClicked:)];
     self.generateButton.translatesAutoresizingMaskIntoConstraints = NO;
     self.generateButton.bezelStyle = NSBezelStyleRounded;
     self.generateButton.keyEquivalent = @"\r";
@@ -1177,7 +1217,7 @@ static void SpliceKit_installDragSpy(void) {
 #pragma mark - UI Helpers
 
 - (NSTextField *)makeLabel:(NSString *)text {
-    NSTextField *label = [NSTextField labelWithString:text];
+    NSTextField *label = [NSTextField labelWithString:SpliceKitCaptionLocalizedLabel(text)];
     label.translatesAutoresizingMaskIntoConstraints = NO;
     label.font = [NSFont systemFontOfSize:12 weight:NSFontWeightMedium];
     label.textColor = [NSColor secondaryLabelColor];

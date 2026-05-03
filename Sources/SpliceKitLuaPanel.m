@@ -27,6 +27,10 @@ static NSFont *SpliceKitLuaPanel_monoFont(CGFloat size) {
     return [NSFont userFixedPitchFontOfSize:size] ?: [NSFont systemFontOfSize:size];
 }
 
+static NSString *SKLua(NSString *english, NSString *korean) {
+    return SpliceKitLocalizedString(english, korean);
+}
+
 // ============================================================================
 #pragma mark - Input Field (handles Up/Down for history)
 // ============================================================================
@@ -140,7 +144,7 @@ static NSFont *SpliceKitLuaPanel_monoFont(CGFloat size) {
                                                        NSWindowStyleMaskUtilityWindow)
                                               backing:NSBackingStoreBuffered
                                                 defer:NO];
-    self.panel.title = @"Lua REPL";
+    self.panel.title = SKLua(@"Lua REPL", @"Lua REPL");
     self.panel.floatingPanel = YES;
     self.panel.becomesKeyOnlyIfNeeded = NO;
     self.panel.hidesOnDeactivate = NO;
@@ -205,7 +209,7 @@ static NSFont *SpliceKitLuaPanel_monoFont(CGFloat size) {
     inputField.bezeled = YES;
     inputField.bezelStyle = NSTextFieldRoundedBezel;
     inputField.focusRingType = NSFocusRingTypeNone;
-    inputField.placeholderString = @"sk.blade()  -- press Enter to execute";
+    inputField.placeholderString = SKLua(@"sk.blade()  -- press Enter to execute", @"sk.blade()  -- Enter로 실행");
     inputField.delegate = self;
     inputField.target = self;
     inputField.action = @selector(inputSubmitted:);
@@ -213,21 +217,21 @@ static NSFont *SpliceKitLuaPanel_monoFont(CGFloat size) {
     self.inputField = inputField;
 
     // Buttons
-    NSButton *runFileButton = [NSButton buttonWithTitle:@"Run File..."
+    NSButton *runFileButton = [NSButton buttonWithTitle:SKLua(@"Run File...", @"파일 실행...")
                                                 target:self
                                                 action:@selector(runFileClicked:)];
     runFileButton.translatesAutoresizingMaskIntoConstraints = NO;
     runFileButton.bezelStyle = NSBezelStyleRounded;
     [bottomBar addSubview:runFileButton];
 
-    NSButton *resetButton = [NSButton buttonWithTitle:@"Reset VM"
+    NSButton *resetButton = [NSButton buttonWithTitle:SKLua(@"Reset VM", @"VM 초기화")
                                                target:self
                                                action:@selector(resetClicked:)];
     resetButton.translatesAutoresizingMaskIntoConstraints = NO;
     resetButton.bezelStyle = NSBezelStyleRounded;
     [bottomBar addSubview:resetButton];
 
-    NSButton *clearButton = [NSButton buttonWithTitle:@"Clear"
+    NSButton *clearButton = [NSButton buttonWithTitle:SKLua(@"Clear", @"지우기")
                                                target:self
                                                action:@selector(clearClicked:)];
     clearButton.translatesAutoresizingMaskIntoConstraints = NO;
@@ -272,11 +276,11 @@ static NSFont *SpliceKitLuaPanel_monoFont(CGFloat size) {
     ]];
 
     // Welcome message
-    [self appendOutput:@"Lua REPL — type Lua code and press Enter\n"
+    [self appendOutput:SKLua(@"Lua REPL — type Lua code and press Enter\n", @"Lua REPL — Lua 코드를 입력하고 Enter를 누르세요\n")
                  color:[NSColor colorWithRed:0.5 green:0.5 blue:0.55 alpha:1.0]];
-    [self appendOutput:@"Use sk.blade(), sk.clips(), sk.seek(5.0), sk.rpc(...), etc.\n"
+    [self appendOutput:SKLua(@"Use sk.blade(), sk.clips(), sk.seek(5.0), sk.rpc(...), etc.\n", @"sk.blade(), sk.clips(), sk.seek(5.0), sk.rpc(...) 등을 사용할 수 있습니다.\n")
                  color:[NSColor colorWithRed:0.5 green:0.5 blue:0.55 alpha:1.0]];
-    [self appendOutput:@"Type 'sk' to see available functions.\n\n"
+    [self appendOutput:SKLua(@"Type 'sk' to see available functions.\n\n", @"사용 가능한 함수를 보려면 'sk'를 입력하세요.\n\n")
                  color:[NSColor colorWithRed:0.5 green:0.5 blue:0.55 alpha:1.0]];
 }
 
@@ -380,7 +384,7 @@ static NSFont *SpliceKitLuaPanel_monoFont(CGFloat size) {
         } else {
             [self appendOutput:[NSString stringWithFormat:@"... %@\n", input]
                          color:[NSColor colorWithRed:0.4 green:0.7 blue:1.0 alpha:1.0]];
-            self.inputField.placeholderString = @"... (continue or press Escape to cancel)";
+            self.inputField.placeholderString = SKLua(@"... (continue or press Escape to cancel)", @"... (계속 입력하거나 Escape로 취소)");
         }
         return;
     }
@@ -392,7 +396,7 @@ static NSFont *SpliceKitLuaPanel_monoFont(CGFloat size) {
     // Check if this starts an incomplete construct
     if (![self isComplete:input]) {
         self.multilineBuffer = [input mutableCopy];
-        self.inputField.placeholderString = @"... (continue or press Escape to cancel)";
+        self.inputField.placeholderString = SKLua(@"... (continue or press Escape to cancel)", @"... (계속 입력하거나 Escape로 취소)");
         return;
     }
 
@@ -411,7 +415,7 @@ static NSFont *SpliceKitLuaPanel_monoFont(CGFloat size) {
     }
     self.historyIndex = -1;
     self.pendingInput = nil;
-    self.inputField.placeholderString = @"sk.blade()  -- press Enter to execute";
+    self.inputField.placeholderString = SKLua(@"sk.blade()  -- press Enter to execute", @"sk.blade()  -- Enter로 실행");
 
     // Execute on background
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
@@ -489,7 +493,7 @@ static NSFont *SpliceKitLuaPanel_monoFont(CGFloat size) {
     if (commandSelector == @selector(cancelOperation:)) {
         if (self.multilineBuffer) {
             self.multilineBuffer = nil;
-            self.inputField.placeholderString = @"sk.blade()  -- press Enter to execute";
+            self.inputField.placeholderString = SKLua(@"sk.blade()  -- press Enter to execute", @"sk.blade()  -- Enter로 실행");
             [self appendOutput:@"(multiline cancelled)\n"
                          color:[NSColor colorWithRed:0.5 green:0.5 blue:0.55 alpha:1.0]];
             return YES;

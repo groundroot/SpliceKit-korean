@@ -29,6 +29,8 @@ const char *SpliceKit_getSocketPath(void);
 // Dual-output logger: NSLog for Console.app + append to ~/Library/Logs/SpliceKit/splicekit.log.
 // The log file is handy for post-mortem debugging when Console isn't open.
 void SpliceKit_log(NSString *format, ...) NS_FORMAT_FUNCTION(1,2);
+BOOL SpliceKit_prefersKorean(void);
+NSString *SpliceKitLocalizedString(NSString *english, NSString *korean);
 
 // Diagnostics: swizzle result tracking and server ready timing
 NSDictionary *SpliceKit_getSwizzleResults(void);

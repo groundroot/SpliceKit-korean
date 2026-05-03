@@ -1,0 +1,79 @@
+name: macOS Build
+
+on:
+  push:
+    branches:
+      - main
+      - "codex/**"
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          clang --version
+
+      - name: Validate Python test harness
+        run: python3 -m py_compile tests/test_ai_command.py
+
+      - name: Build runtime
+        run: make -j4
+
+      - name: Build tools
+        run: make tools
+
+      - name: Build symbols
+        run: make symbols
+
+      - name: Build patcher app
+        run: |
+          xcodebuild \
+            -project patcher/SpliceKit.xcodeproj \
+            -scheme SpliceKit \
+            -configuration Release \
+            -derivedDataPath patcher/build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package unsigned artifacts
+        run: |
+          mkdir -p dist
+          cp build/SpliceKit dist/SpliceKit
+          cp -R build/SpliceKit.dSYM dist/SpliceKit.dSYM
+          cp build/silence-detector dist/silence-detector
+          cp build/structure-analyzer dist/structure-analyzer
+          cp build/SpliceKitMixer dist/SpliceKitMixer
+          if [ -d patcher/build/Build/Products/Release/SpliceKit.app ]; then
+            cp -R patcher/build/Build/Products/Release/SpliceKit.app dist/SpliceKit.app
+          fi
+          ditto -c -k --sequesterRsrc --keepParent dist "SpliceKit-unsigned-artifacts.zip"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: splicekit-macos-build
+          path: SpliceKit-unsigned-artifacts.zip
+
+      - name: Publish GitHub release artifact
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: SpliceKit-unsigned-artifacts.zip
+          generate_release_notes: true
