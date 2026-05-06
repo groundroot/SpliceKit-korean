@@ -23,11 +23,15 @@ mkdir -p "$BUILD_OUT"
 # Ensure the vendored Sentry framework exists before Swift sources compile.
 bash "$REPO_DIR/Scripts/ensure_sentry_framework.sh"
 
-# Build everything via the Makefile (handles incremental builds)
-# Includes braw-prototype so the VT decoder + FormatReader bundles end up
-# at build/braw-prototype/{Codecs,FormatReaders}/*.bundle ready to ship.
+# Build the core runtime and bundled tools via the Makefile.
+# Optional prototype bundles should not block the installer app from building.
 echo "Building SpliceKit via Makefile..."
-make -C "$REPO_DIR" all tools braw-prototype
+make -C "$REPO_DIR" all tools
+
+echo "Attempting optional BRAW prototype build..."
+if ! make -C "$REPO_DIR" braw-prototype; then
+    echo "Warning: BRAW prototype build failed; continuing without bundled BRAW prototype plugins."
+fi
 
 # Copy artifacts to Xcode's expected location
 cp "$REPO_DIR/build/SpliceKit" "$BUILD_OUT/SpliceKit"
