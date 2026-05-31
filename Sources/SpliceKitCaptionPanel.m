@@ -607,6 +607,14 @@ static SpliceKitCaptionAnimation SpliceKitCaption_animationFromName(NSString *na
 // UI
 @property (nonatomic, strong) NSPopUpButton *presetPopup;
 @property (nonatomic, strong) NSPopUpButton *enginePopup;
+// Whisper model download UI (shown when a Whisper engine is selected and model is not cached)
+@property (nonatomic, strong) NSView *modelStatusRow;        // container row
+@property (nonatomic, strong) NSTextField *modelStatusLabel; // "Model not downloaded (950 MB)"
+@property (nonatomic, strong) NSButton *downloadModelButton; // "Download" / "Downloading…"
+@property (nonatomic, strong) NSProgressIndicator *downloadProgress; // determinate bar
+@property (nonatomic, strong) NSTask *downloadTask;          // running --download-only task
+@property (nonatomic) BOOL isDownloadingModel;
+@property (nonatomic, strong) NSLayoutConstraint *modelStatusRowHeightConstraint;
 @property (nonatomic, strong) NSPopUpButton *fontPopup;
 @property (nonatomic, strong) NSTextField *fontSizeField;
 @property (nonatomic, strong) NSSlider *fontSizeSlider;
@@ -888,6 +896,78 @@ static void SpliceKit_installDragSpy(void) {
         [self.enginePopup.trailingAnchor constraintEqualToAnchor:docView.trailingAnchor constant:-pad],
     ]];
     prev = engineLabel;
+
+    // === WHISPER MODEL STATUS ROW ===
+    // Shown only when a Whisper engine is selected and its model is not yet cached.
+    self.modelStatusRow = [[NSView alloc] init];
+    self.modelStatusRow.translatesAutoresizingMaskIntoConstraints = NO;
+    self.modelStatusRow.hidden = YES; // shown/hidden by updateModelStatusUI
+    [docView addSubview:self.modelStatusRow];
+
+    // Warning icon + status text
+    NSImageView *warnIcon = [[NSImageView alloc] init];
+    warnIcon.translatesAutoresizingMaskIntoConstraints = NO;
+    warnIcon.image = [NSImage imageWithSystemSymbolName:@"arrow.down.circle" accessibilityDescription:nil];
+    warnIcon.contentTintColor = [NSColor systemOrangeColor];
+    warnIcon.imageScaling = NSImageScaleProportionallyDown;
+    [self.modelStatusRow addSubview:warnIcon];
+
+    self.modelStatusLabel = [NSTextField labelWithString:
+        SKCaption(@"Model not downloaded", @"모델이 다운로드되지 않았습니다")];
+    self.modelStatusLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    self.modelStatusLabel.font = [NSFont systemFontOfSize:11];
+    self.modelStatusLabel.textColor = [NSColor secondaryLabelColor];
+    self.modelStatusLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+    [self.modelStatusRow addSubview:self.modelStatusLabel];
+
+    self.downloadModelButton = [NSButton buttonWithTitle:SKCaption(@"Download", @"다운로드")
+                                                  target:self
+                                                  action:@selector(downloadModelClicked:)];
+    self.downloadModelButton.translatesAutoresizingMaskIntoConstraints = NO;
+    self.downloadModelButton.bezelStyle = NSBezelStyleRounded;
+    self.downloadModelButton.controlSize = NSControlSizeSmall;
+    self.downloadModelButton.font = [NSFont systemFontOfSize:11];
+    [self.modelStatusRow addSubview:self.downloadModelButton];
+
+    self.downloadProgress = [[NSProgressIndicator alloc] initWithFrame:NSZeroRect];
+    self.downloadProgress.translatesAutoresizingMaskIntoConstraints = NO;
+    self.downloadProgress.style = NSProgressIndicatorStyleBar;
+    self.downloadProgress.indeterminate = NO;
+    self.downloadProgress.minValue = 0;
+    self.downloadProgress.maxValue = 1;
+    self.downloadProgress.doubleValue = 0;
+    self.downloadProgress.hidden = YES;
+    self.downloadProgress.controlSize = NSControlSizeSmall;
+    [self.modelStatusRow addSubview:self.downloadProgress];
+
+    // Start collapsed; updateModelStatusUI will expand to 24pt when visible.
+    self.modelStatusRowHeightConstraint = [self.modelStatusRow.heightAnchor constraintEqualToConstant:0];
+    [NSLayoutConstraint activateConstraints:@[
+        [self.modelStatusRow.topAnchor constraintEqualToAnchor:engineLabel.bottomAnchor constant:2],
+        [self.modelStatusRow.leadingAnchor constraintEqualToAnchor:docView.leadingAnchor constant:pad],
+        [self.modelStatusRow.trailingAnchor constraintEqualToAnchor:docView.trailingAnchor constant:-pad],
+        self.modelStatusRowHeightConstraint,
+
+        [warnIcon.leadingAnchor constraintEqualToAnchor:self.modelStatusRow.leadingAnchor],
+        [warnIcon.centerYAnchor constraintEqualToAnchor:self.modelStatusRow.centerYAnchor],
+        [warnIcon.widthAnchor constraintEqualToConstant:14],
+        [warnIcon.heightAnchor constraintEqualToConstant:14],
+
+        [self.modelStatusLabel.leadingAnchor constraintEqualToAnchor:warnIcon.trailingAnchor constant:4],
+        [self.modelStatusLabel.centerYAnchor constraintEqualToAnchor:self.modelStatusRow.centerYAnchor],
+        [self.modelStatusLabel.trailingAnchor constraintEqualToAnchor:self.downloadModelButton.leadingAnchor constant:-8],
+
+        [self.downloadModelButton.trailingAnchor constraintEqualToAnchor:self.modelStatusRow.trailingAnchor],
+        [self.downloadModelButton.centerYAnchor constraintEqualToAnchor:self.modelStatusRow.centerYAnchor],
+
+        // Progress bar shares space with the download button (shown/hidden alternately)
+        [self.downloadProgress.trailingAnchor constraintEqualToAnchor:self.modelStatusRow.trailingAnchor],
+        [self.downloadProgress.centerYAnchor constraintEqualToAnchor:self.modelStatusRow.centerYAnchor],
+        [self.downloadProgress.widthAnchor constraintEqualToConstant:110],
+    ]];
+    // modelStatusRow is positioned after engineLabel but occupies 0pt when hidden.
+    // Use modelStatusRow as prev so preview sits below it (or below engineLabel when hidden).
+    prev = self.modelStatusRow;
 
     // === PREVIEW ===
     self.previewView = [[NSView alloc] init];
@@ -1256,6 +1336,195 @@ static void SpliceKit_installDragSpy(void) {
     ]];
 }
 
+#pragma mark - Whisper Model Download UI
+
+// Returns whether the given whisper variant is fully cached locally.
+- (BOOL)isWhisperVariantCached:(NSString *)variant {
+    NSURL *appSupport = [[[NSFileManager defaultManager]
+        URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask] firstObject];
+    NSURL *modelPath = [[[[ appSupport
+        URLByAppendingPathComponent:@"SpliceKit/Models/whisper"]
+        URLByAppendingPathComponent:@"models"]
+        URLByAppendingPathComponent:@"argmaxinc/whisperkit-coreml"]
+        URLByAppendingPathComponent:[NSString stringWithFormat:@"openai_whisper-%@", variant]];
+    for (NSString *comp in @[@"MelSpectrogram.mlmodelc", @"AudioEncoder.mlmodelc", @"TextDecoder.mlmodelc"]) {
+        NSURL *weight = [[modelPath URLByAppendingPathComponent:comp]
+            URLByAppendingPathComponent:@"weights/weight.bin"];
+        if (![[NSFileManager defaultManager] fileExistsAtPath:weight.path]) return NO;
+    }
+    return YES;
+}
+
+// Show/hide the model status row based on the selected engine and cache state.
+- (void)updateModelStatusUI {
+    if (!self.modelStatusRow) return;
+
+    NSString *engineID = [self currentEngineID];
+    BOOL isWhisper = [engineID hasPrefix:@"whisper"];
+
+    if (!isWhisper) {
+        [self setModelStatusRowVisible:NO];
+        return;
+    }
+
+    // If currently downloading, keep row visible with progress state
+    if (self.isDownloadingModel) {
+        [self setModelStatusRowVisible:YES];
+        return;
+    }
+
+    NSString *variant = [engineID isEqualToString:@"whisperLargeV3"] ? @"large-v3" : @"large-v3_turbo";
+    BOOL cached = [self isWhisperVariantCached:variant];
+
+    if (cached) {
+        [self setModelStatusRowVisible:NO];
+    } else {
+        NSInteger sizeMB = [variant isEqualToString:@"large-v3"] ? 1550 : 950;
+        NSString *name = [variant isEqualToString:@"large-v3"]
+            ? SKCaption(@"Whisper large-v3", @"Whisper large-v3")
+            : SKCaption(@"Whisper large-v3-turbo", @"Whisper large-v3-turbo");
+        self.modelStatusLabel.stringValue = [NSString stringWithFormat:
+            SKCaption(@"%@ not downloaded (~%ld MB)", @"%@ 미다운로드 (약 %ldMB)"),
+            name, (long)sizeMB];
+        self.downloadModelButton.title = SKCaption(@"Download", @"다운로드");
+        self.downloadModelButton.enabled = YES;
+        self.downloadModelButton.hidden = NO;
+        self.downloadProgress.hidden = YES;
+        [self setModelStatusRowVisible:YES];
+    }
+}
+
+- (void)setModelStatusRowVisible:(BOOL)visible {
+    if (!self.modelStatusRow || !self.modelStatusRowHeightConstraint) return;
+    self.modelStatusRow.hidden = !visible;
+    self.modelStatusRowHeightConstraint.constant = visible ? 24 : 0;
+}
+
+- (void)downloadModelClicked:(id)sender {
+    if (self.isDownloadingModel) return;
+
+    NSString *engineID = [self currentEngineID];
+    NSString *variant = [engineID isEqualToString:@"whisperLargeV3"] ? @"large-v3" : @"large-v3_turbo";
+    NSString *modelArg = [variant isEqualToString:@"large-v3"] ? @"large-v3" : @"large-v3-turbo";
+    NSString *prettyName = [variant isEqualToString:@"large-v3"]
+        ? SKCaption(@"Whisper large-v3", @"Whisper large-v3")
+        : SKCaption(@"Whisper large-v3-turbo", @"Whisper large-v3-turbo");
+
+    NSString *binaryPath = [self whisperTranscriberPath];
+    if (!binaryPath || ![[NSFileManager defaultManager] isExecutableFileAtPath:binaryPath]) {
+        self.modelStatusLabel.stringValue = SKCaption(
+            @"whisper-transcriber not found. Re-run SpliceKit patcher.",
+            @"whisper-transcriber를 찾을 수 없습니다. SpliceKit 패처를 다시 실행하세요.");
+        return;
+    }
+
+    self.isDownloadingModel = YES;
+    [self setModelStatusRowVisible:YES];
+    self.downloadModelButton.hidden = YES;
+    self.downloadProgress.hidden = NO;
+    self.downloadProgress.doubleValue = 0;
+    self.downloadProgress.indeterminate = YES;
+    [self.downloadProgress startAnimation:nil];
+    self.modelStatusLabel.stringValue = [NSString stringWithFormat:
+        SKCaption(@"Downloading %@…", @"%@ 다운로드 중…"), prettyName];
+
+    NSTask *task = [[NSTask alloc] init];
+    task.launchPath = binaryPath;
+    task.arguments = @[@"--download-only", @"--model", modelArg, @"--progress"];
+    self.downloadTask = task;
+
+    NSPipe *errPipe = [NSPipe pipe];
+    NSPipe *outPipe = [NSPipe pipe];
+    task.standardError = errPipe;
+    task.standardOutput = outPipe;
+
+    // Parse PROGRESS: lines from stderr for live progress bar updates
+    errPipe.fileHandleForReading.readabilityHandler = ^(NSFileHandle *handle) {
+        NSData *data = handle.availableData;
+        if (data.length == 0) return;
+        NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+        for (NSString *rawLine in [text componentsSeparatedByString:@"\n"]) {
+            NSString *line = [rawLine stringByTrimmingCharactersInSet:
+                [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (line.length == 0) continue;
+            SpliceKit_log(@"[WhisperDownload] %@", line);
+
+            if ([line hasPrefix:@"PROGRESS:"]) {
+                NSArray *parts = [line componentsSeparatedByString:@":"];
+                if (parts.count >= 3) {
+                    double frac = [parts[1] doubleValue];
+                    NSString *msg = [[parts subarrayWithRange:NSMakeRange(2, parts.count - 2)]
+                        componentsJoinedByString:@":"];
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        if (frac > 0 && frac < 1.0 && self.downloadProgress.isIndeterminate) {
+                            self.downloadProgress.indeterminate = NO;
+                            [self.downloadProgress stopAnimation:nil];
+                        }
+                        if (!self.downloadProgress.isIndeterminate) {
+                            self.downloadProgress.doubleValue = frac;
+                        }
+                        self.modelStatusLabel.stringValue = [NSString stringWithFormat:
+                            SKCaption(@"Downloading %@: %@", @"%@ 다운로드 중: %@"), prettyName, msg];
+                    });
+                }
+            } else if ([line hasPrefix:@"ERROR:"]) {
+                NSString *errMsg = [line substringFromIndex:6];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    self.modelStatusLabel.stringValue = [NSString stringWithFormat:
+                        SKCaption(@"Download error: %@", @"다운로드 오류: %@"), errMsg];
+                });
+            }
+        }
+    };
+
+    task.terminationHandler = ^(NSTask *t) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.isDownloadingModel = NO;
+            self.downloadTask = nil;
+            [self.downloadProgress stopAnimation:nil];
+            self.downloadProgress.hidden = YES;
+            self.downloadProgress.indeterminate = NO;
+            self.downloadProgress.doubleValue = 0;
+
+            if (t.terminationStatus == 0) {
+                // Success — hide the row (model is now cached)
+                self.modelStatusRow.hidden = YES;
+                self.modelStatusLabel.stringValue = SKCaption(
+                    @"Model downloaded.", @"모델 다운로드 완료.");
+                SpliceKit_log(@"[WhisperDownload] %@ downloaded successfully.", prettyName);
+                // Briefly show success message then hide
+                [self setModelStatusRowVisible:YES];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
+                    dispatch_get_main_queue(), ^{
+                    [self updateModelStatusUI];
+                });
+            } else {
+                // Failure — show download button again
+                self.downloadModelButton.hidden = NO;
+                self.downloadModelButton.title = SKCaption(@"Retry", @"다시 시도");
+                self.downloadModelButton.enabled = YES;
+                SpliceKit_log(@"[WhisperDownload] Download failed (exit %d)", t.terminationStatus);
+            }
+        });
+    };
+
+    NSError *launchErr = nil;
+    @try {
+        [task launch];
+        SpliceKit_log(@"[WhisperDownload] Started download of %@ (PID %d)", prettyName, task.processIdentifier);
+    } @catch (NSException *e) {
+        self.isDownloadingModel = NO;
+        self.downloadTask = nil;
+        [self.downloadProgress stopAnimation:nil];
+        self.downloadProgress.hidden = YES;
+        self.downloadModelButton.hidden = NO;
+        self.downloadModelButton.enabled = YES;
+        self.modelStatusLabel.stringValue = [NSString stringWithFormat:
+            SKCaption(@"Failed to start: %@", @"시작 실패: %@"), e.reason];
+    }
+    (void)launchErr;
+}
+
 - (void)syncUIFromStyle {
     if (!self.panel) return;
     SpliceKitCaptionStyle *s = self.style;
@@ -1376,6 +1645,7 @@ static void SpliceKit_installDragSpy(void) {
     NSString *engineID = [self currentEngineID];
     [[NSUserDefaults standardUserDefaults] setObject:engineID forKey:@"SpliceKitCaptionEngine"];
     SpliceKit_log(@"[Captions] Transcription engine switched to: %@", engineID);
+    [self updateModelStatusUI];
 }
 
 - (NSString *)currentEngineID {
@@ -1467,6 +1737,7 @@ static void SpliceKit_installDragSpy(void) {
 
     [self setupPanelIfNeeded];
     [self restorePersistedStateForCurrentSequenceIfNeeded];
+    [self updateModelStatusUI];
     [self.panel makeKeyAndOrderFront:nil];
 
     // Motion title channels are not always ready at the first open tick after
@@ -2344,6 +2615,26 @@ static void SpliceKit_installDragSpy(void) {
         [self transcriptionFailedWithError:
             [NSString stringWithFormat:@"%@ binary is not executable. Try: chmod +x ~/Applications/SpliceKit/tools/%@", engineLabel, binaryName]];
         return;
+    }
+
+    // For Whisper engines, check the model is cached before starting transcription.
+    // If not, prompt the user to download via the UI instead of hanging on HuggingFace.
+    if ([engineID hasPrefix:@"whisper"]) {
+        NSString *variant = [engineID isEqualToString:@"whisperLargeV3"] ? @"large-v3" : @"large-v3_turbo";
+        if (![self isWhisperVariantCached:variant]) {
+            NSString *modelName = [engineID isEqualToString:@"whisperLargeV3"]
+                ? @"Whisper large-v3" : @"Whisper large-v3-turbo";
+            [self transcriptionFailedWithError:[NSString stringWithFormat:
+                SKCaption(
+                    @"%@ model is not downloaded. Click \"Download\" above to install it first.",
+                    @"%@ 모델이 다운로드되지 않았습니다. 위의 \"다운로드\" 버튼을 눌러 먼저 설치하세요."),
+                modelName]];
+            // Ensure the download row is visible
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self updateModelStatusUI];
+            });
+            return;
+        }
     }
 
     SpliceKit_log(@"[Captions] Using %@ at: %@", binaryName, binaryPath);
