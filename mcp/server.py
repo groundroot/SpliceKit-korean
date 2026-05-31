@@ -328,6 +328,7 @@ DESTRUCTIVE_TOOLS = {
     "stabilize_subject",
     "insert_title",
     "generate_captions",
+    "generate_korean_captions",
     "export_captions_srt",
     "export_captions_txt",
     "generate_native_captions",
@@ -511,6 +512,7 @@ CUSTOM_TOOL_TITLES = {
     "set_caption_style": "Set Caption Style",
     "set_caption_grouping": "Set Caption Grouping",
     "generate_captions": "Generate Captions",
+    "generate_korean_captions": "Generate Korean Captions",
     "export_captions_srt": "Export Captions SRT",
     "export_captions_txt": "Export Captions Text",
     "set_caption_words": "Set Caption Words",
@@ -6968,6 +6970,123 @@ def generate_native_captions(grouping: str = "word", language: str = "en",
     if _err(r):
         return f"Error: {r.get('error', r)}"
     return _fmt(r)
+
+
+@mcp.tool()
+def generate_korean_captions(
+    source_language: str = "auto",
+    style: str = "bold_pop",
+    position: str = "center",
+    animation: str = "pop",
+    word_highlight: bool = True,
+    max_words: int = 3,
+    all_caps: bool = False,
+    translate: bool = False,
+) -> str:
+    """Generate Korean captions from the timeline audio.
+
+    Two modes:
+    - **Korean audio** (translate=False, default): Transcribes the audio
+      directly in Korean using Parakeet v3 with ko-KR language mode.
+      Best when the speakers are already speaking Korean.
+    - **Translation mode** (translate=True): Transcribes in the source
+      language first, then translates each segment to Korean via Google
+      Translate (requires internet), then generates captions.
+
+    Args:
+        source_language: Source audio language for transcription.
+            "auto" (default) = detect automatically.
+            "ko-KR" = Korean (bypasses translation even if translate=True).
+            "en-US", "ja", "zh", etc. for other languages.
+        style: Caption style preset (default "bold_pop").
+               Recommended Korean-friendly presets: "bold_pop", "social_bold",
+               "clean_minimal", "subtitle_pro".
+        position: "bottom", "center", "top"
+        animation: "none", "fade", "pop", "slide_up", "typewriter", "bounce"
+        word_highlight: Word-by-word karaoke highlighting
+        max_words: Max words per caption segment (default 3, good for Korean)
+        all_caps: Convert to uppercase (not recommended for Korean — set False)
+        translate: If True, translate transcript to Korean before generating
+                   captions. Use when source audio is NOT in Korean.
+
+    Returns status, word count, and verification result.
+
+    Example — Korean audio:
+        generate_korean_captions()
+
+    Example — English audio → Korean captions:
+        generate_korean_captions(source_language="en-US", translate=True)
+    """
+    # Step 1: Open captions panel and start transcription with language hint
+    lang_param = source_language if source_language != "auto" else ""
+    open_params: dict = {}
+    if lang_param:
+        open_params["language"] = lang_param
+    # For Korean audio, set ko-KR so Parakeet uses Korean mode
+    if not translate and source_language in ("auto", "ko-KR", "ko"):
+        open_params["language"] = "ko-KR"
+
+    r = bridge.call("captions.open", **open_params)
+    if _err(r):
+        return f"Error opening captions: {r.get('error', r)}"
+
+    # Step 2: Wait for transcription to finish
+    import time
+    for _ in range(120):  # up to 2 minutes
+        state = bridge.call("captions.getState")
+        status = state.get("status", "idle")
+        if status == "ready":
+            break
+        if status == "error":
+            return f"Transcription error: {state.get('error', 'unknown')}"
+        time.sleep(1.0)
+    else:
+        return "Timeout waiting for transcription. Use get_caption_state() to check progress, then retry."
+
+    word_count = state.get("wordCount", 0)
+    if word_count == 0:
+        return "No words transcribed. Make sure the timeline has audio clips."
+
+    # Step 3: Translate to Korean if requested and source is not already Korean
+    translate_result = ""
+    if translate and source_language not in ("ko-KR", "ko"):
+        sl = source_language.split("-")[0] if source_language != "auto" else "auto"
+        r = bridge.call("captions.translateToKorean", sourceLanguage=sl)
+        if _err(r):
+            return f"Translation error: {r.get('error', r)}"
+        translate_result = (
+            f"\nTranslated {r.get('wordCount', 0)} words to Korean"
+            + (f" ({r.get('errorCount', 0)} errors)" if r.get('errorCount', 0) else "")
+        )
+        word_count = r.get("wordCount", word_count)
+
+    # Step 4: Generate captions with Korean-friendly settings
+    gen_params = {
+        "style": style,
+        "position": position,
+        "animation": animation,
+        "wordByWordHighlight": word_highlight,
+        "maxWords": max_words,
+        "allCaps": all_caps,
+    }
+    r = bridge.call("captions.generate", **gen_params)
+    if _err(r):
+        return f"Error generating captions: {r.get('error', r)}"
+
+    lines = [
+        f"Korean captions generated successfully.",
+        f"Words: {word_count}",
+        f"Mode: {'translation (' + source_language + ' → ko)' if translate else 'Korean transcription (ko-KR)'}",
+    ]
+    if translate_result:
+        lines.append(translate_result.strip())
+    if r.get("clipCount"):
+        lines.append(f"Caption clips created: {r['clipCount']}")
+    if r.get("verified"):
+        v = r["verified"]
+        lines.append(f"Verified: font={v.get('fontFamily', '?')}, size={v.get('fontSize', '?')}pt, "
+                     f"text sample=\"{v.get('text', '?')}\"")
+    return "\n".join(lines)
 
 
 @mcp.tool(annotations=_tool_annotations("verify_native_captions"))

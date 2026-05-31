@@ -128,9 +128,16 @@ extern NSNotificationName const SpliceKitCaptionDidGenerateNotification;
 - (void)hidePanel;
 - (BOOL)isVisible;
 
-// Transcription (delegates to SpliceKitTranscriptPanel)
+// Transcription
 - (void)transcribeTimeline;
 - (void)setWordsManually:(NSArray<NSDictionary *> *)wordDicts;
+
+// Korean caption generation
+// transcriptionLanguage: "auto" (default), "ko-KR", "en-US", etc.
+// When set to "ko-KR", the transcriber uses Korean language mode.
+@property (nonatomic, copy) NSString *transcriptionLanguage;
+- (NSDictionary *)translateWordsToKorean:(NSArray<SpliceKitTranscriptWord *> *)words
+                           sourceLanguage:(NSString *)sourceLang;
 
 // Style
 - (void)setStyle:(SpliceKitCaptionStyle *)style;

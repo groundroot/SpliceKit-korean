@@ -128,6 +128,7 @@ static void SpliceKit_initBuiltinMetadata(void) {
             @"captions.verify": meta(@"safe", @"Inspect titles to verify caption text."),
             @"captions.exportSRT": meta(@"safe", @"Write SRT file."),
             @"captions.exportTXT": meta(@"safe", @"Write plain text file."),
+            @"captions.translateToKorean": meta(@"state_dependent", @"Translate loaded caption words to Korean (requires network)."),
 
             // transcript.*
             @"transcript.open": meta(@"destructive", @"Transcribe timeline or file (long-running)."),

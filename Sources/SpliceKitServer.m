@@ -6888,6 +6888,7 @@ static NSDictionary *SpliceKit_handleTranscriptSetSpeaker(NSDictionary *params) 
 static NSDictionary *SpliceKit_handleCaptionsOpen(NSDictionary *params) {
     NSString *fileURL = params[@"fileURL"];
     NSString *presetID = params[@"style"];
+    NSString *language = params[@"language"]; // "auto", "ko-KR", "en-US", etc.
     __block BOOL startedTranscription = NO;
     __block BOOL restoredCaptions = NO;
     __block BOOL alreadyTranscribing = NO;
@@ -6897,6 +6898,9 @@ static NSDictionary *SpliceKit_handleCaptionsOpen(NSDictionary *params) {
         if (presetID) {
             SpliceKitCaptionStyle *style = [SpliceKitCaptionStyle presetWithID:presetID];
             if (style) [panel setStyle:style];
+        }
+        if (language.length > 0) {
+            panel.transcriptionLanguage = language;
         }
         [panel showPanel];
         if (fileURL) {
@@ -7051,6 +7055,48 @@ static NSDictionary *SpliceKit_handleCaptionsSetWords(NSDictionary *params) {
         return @{@"error": @"words array required"};
     [[SpliceKitCaptionPanel sharedPanel] setWordsManually:wordDicts];
     return @{@"status": @"ok", @"wordCount": @(wordDicts.count)};
+}
+
+// Translate the currently loaded caption words to Korean.
+// sourceLanguage: "auto" (default), "en", "ja", "zh", etc.
+// After translation, the panel words are replaced with Korean-text words
+// that retain their original timing. Call captions.generate afterwards.
+static NSDictionary *SpliceKit_handleCaptionsTranslateToKorean(NSDictionary *params) {
+    SpliceKitCaptionPanel *panel = [SpliceKitCaptionPanel sharedPanel];
+    NSArray<SpliceKitTranscriptWord *> *words = panel.words;
+    if (!words || words.count == 0) {
+        return @{@"error": @"No words loaded. Transcribe first with captions.open, then call this."};
+    }
+    NSString *sourceLang = params[@"sourceLanguage"] ?: @"auto";
+    NSDictionary *result = [panel translateWordsToKorean:words sourceLanguage:sourceLang];
+    if (result[@"error"]) return result;
+
+    NSArray<SpliceKitTranscriptWord *> *translated = result[@"translatedWords"];
+    if (!translated || translated.count == 0) {
+        return @{@"error": @"Translation returned no words"};
+    }
+
+    // Convert to dicts and inject back into the panel
+    NSMutableArray *wordDicts = [NSMutableArray arrayWithCapacity:translated.count];
+    for (SpliceKitTranscriptWord *w in translated) {
+        [wordDicts addObject:@{
+            @"text": w.text ?: @"",
+            @"startTime": @(w.startTime),
+            @"duration": @(w.duration > 0 ? w.duration : 0.1),
+        }];
+    }
+    [panel setWordsManually:wordDicts];
+
+    return @{
+        @"status": @"ok",
+        @"wordCount": @(translated.count),
+        @"groupCount": result[@"groupCount"] ?: @0,
+        @"errorCount": result[@"errorCount"] ?: @0,
+        @"errors": result[@"errors"] ?: @[],
+        @"message": [NSString stringWithFormat:
+            @"Translated %lu words to Korean. Call captions.generate to insert captions.",
+            (unsigned long)translated.count],
+    };
 }
 
 static NSDictionary *SpliceKit_handleCaptionsSetXML(NSDictionary *params) {
@@ -27805,6 +27851,8 @@ NSDictionary *SpliceKit_handleRequest(NSDictionary *request) {
         result = SpliceKit_handleCaptionsExportTXT(params);
     } else if ([method isEqualToString:@"captions.setWords"]) {
         result = SpliceKit_handleCaptionsSetWords(params);
+    } else if ([method isEqualToString:@"captions.translateToKorean"]) {
+        result = SpliceKit_handleCaptionsTranslateToKorean(params);
     } else if ([method isEqualToString:@"captions.setXML"]) {
         result = SpliceKit_handleCaptionsSetXML(params);
     } else if ([method isEqualToString:@"captions.verify"]) {

@@ -601,6 +601,7 @@ static SpliceKitCaptionAnimation SpliceKitCaption_animationFromName(NSString *na
 @property (nonatomic, strong) NSMutableArray<SpliceKitCaptionSegment *> *mutableSegments;
 @property (nonatomic) SpliceKitCaptionStatus status;
 @property (nonatomic, copy) NSString *errorMessage;
+@property (nonatomic, copy) NSString *transcriptionLanguage; // "auto", "ko-KR", "en-US"
 @property (nonatomic, strong) NSDictionary *lastGenerateResult;
 
 // UI
@@ -2444,6 +2445,15 @@ static void SpliceKit_installDragSpy(void) {
 
     // Run transcriber binary
     NSMutableArray *taskArgs = [NSMutableArray arrayWithObjects:@"--batch", manifestPath, @"--progress", @"--model", modelArg, nil];
+
+    // Pass language hint to transcriber when set explicitly (not auto)
+    NSString *langHint = self.transcriptionLanguage;
+    if (langHint.length > 0 && ![langHint isEqualToString:@"auto"]) {
+        // Normalize "ko-KR" → "ko" for the transcriber CLI
+        NSString *langCode = [[langHint componentsSeparatedByString:@"-"] firstObject] ?: langHint;
+        [taskArgs addObjectsFromArray:@[@"--language", langCode]];
+        SpliceKit_log(@"[Captions] Transcription language hint: %@ (code: %@)", langHint, langCode);
+    }
 
     NSTask *task = [[NSTask alloc] init];
     task.launchPath = binaryPath;
@@ -5604,6 +5614,178 @@ static BOOL SpliceKitCaption_pollMainThread(BOOL (^condition)(void), double time
 }
 
 #pragma mark - SRT / TXT Export
+
+static SpliceKitTranscriptWord *SKCaption_cloneWord(SpliceKitTranscriptWord *src) {
+    SpliceKitTranscriptWord *w = [[SpliceKitTranscriptWord alloc] init];
+    w.text = src.text;
+    w.startTime = src.startTime;
+    w.duration = src.duration;
+    w.endTime = src.endTime;
+    w.confidence = src.confidence;
+    w.wordIndex = src.wordIndex;
+    w.clipHandle = src.clipHandle;
+    w.clipTimelineStart = src.clipTimelineStart;
+    w.sourceMediaOffset = src.sourceMediaOffset;
+    w.sourceMediaTime = src.sourceMediaTime;
+    w.sourceMediaPath = src.sourceMediaPath;
+    w.speaker = src.speaker;
+    return w;
+}
+
+// Translate word texts to Korean using Google Translate free endpoint.
+// Words keep their original timing; only the text is replaced with Korean.
+// Groups consecutive words into sentences for better translation quality.
+- (NSDictionary *)translateWordsToKorean:(NSArray<SpliceKitTranscriptWord *> *)words
+                           sourceLanguage:(NSString *)sourceLang {
+    if (words.count == 0) return @{@"error": @"No words to translate"};
+
+    // Group words into short sentences (up to ~10 words) for better translation
+    NSMutableArray<NSArray<SpliceKitTranscriptWord *> *> *groups = [NSMutableArray array];
+    NSMutableArray<SpliceKitTranscriptWord *> *currentGroup = [NSMutableArray array];
+    int wordsInGroup = 0;
+    for (SpliceKitTranscriptWord *w in words) {
+        [currentGroup addObject:w];
+        wordsInGroup++;
+        BOOL isSentenceEnd = ([w.text hasSuffix:@"."] || [w.text hasSuffix:@"?"] || [w.text hasSuffix:@"!"]);
+        if (wordsInGroup >= 10 || isSentenceEnd) {
+            [groups addObject:[currentGroup copy]];
+            [currentGroup removeAllObjects];
+            wordsInGroup = 0;
+        }
+    }
+    if (currentGroup.count > 0) [groups addObject:[currentGroup copy]];
+
+    // Translate each group synchronously via Google Translate free endpoint
+    NSString *sl = sourceLang.length > 0 ? sourceLang : @"auto";
+    NSMutableArray<SpliceKitTranscriptWord *> *translatedWords = [NSMutableArray array];
+    NSUInteger translatedGroupCount = 0;
+    NSMutableArray<NSString *> *errors = [NSMutableArray array];
+
+    for (NSArray<SpliceKitTranscriptWord *> *group in groups) {
+        NSMutableArray<NSString *> *texts = [NSMutableArray array];
+        for (SpliceKitTranscriptWord *w in group) [texts addObject:w.text ?: @""];
+        NSString *combined = [texts componentsJoinedByString:@" "];
+
+        // URL-encode the query text
+        NSString *encoded = [combined stringByAddingPercentEncodingWithAllowedCharacters:
+            [NSCharacterSet URLQueryAllowedCharacterSet]];
+        NSString *urlStr = [NSString stringWithFormat:
+            @"https://translate.googleapis.com/translate_a/single?client=gtx&sl=%@&tl=ko&dt=t&q=%@",
+            sl, encoded];
+        NSURL *url = [NSURL URLWithString:urlStr];
+
+        NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url
+            cachePolicy:NSURLRequestUseProtocolCachePolicy timeoutInterval:15.0];
+        [req setValue:@"Mozilla/5.0" forHTTPHeaderField:@"User-Agent"];
+
+        dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+        __block NSString *translatedText = nil;
+        __block NSError *netError = nil;
+
+        NSURLSession *session = [NSURLSession sharedSession];
+        [[session dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
+            if (err || !data) { netError = err; dispatch_semaphore_signal(sem); return; }
+            // Response: [[[["번역된텍스트","원문",null,null,10],...],null,"sl"],...]
+            id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+            NSMutableString *result = [NSMutableString string];
+            if ([json isKindOfClass:[NSArray class]] && [json[0] isKindOfClass:[NSArray class]]) {
+                for (id piece in json[0]) {
+                    if ([piece isKindOfClass:[NSArray class]] && [piece count] > 0 &&
+                        [piece[0] isKindOfClass:[NSString class]]) {
+                        [result appendString:piece[0]];
+                    }
+                }
+            }
+            translatedText = result.length > 0 ? result : nil;
+            dispatch_semaphore_signal(sem);
+        }] resume];
+        dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC));
+
+        if (netError || !translatedText) {
+            NSString *errMsg = netError.localizedDescription ?: @"empty response";
+            [errors addObject:[NSString stringWithFormat:@"Group %lu: %@", (unsigned long)translatedGroupCount, errMsg]];
+            // Fall back to original text for this group
+            for (SpliceKitTranscriptWord *w in group) {
+                [translatedWords addObject:SKCaption_cloneWord(w)];
+            }
+            translatedGroupCount++;
+            continue;
+        }
+
+        // Split translated text back into per-word tokens, preserving timing from originals
+        NSArray<NSString *> *tokens = [translatedText componentsSeparatedByString:@" "];
+        NSUInteger wordCount = group.count;
+        NSUInteger tokenCount = tokens.count;
+
+        if (tokenCount == 0) {
+            // Whole group as single word on the first slot
+            SpliceKitTranscriptWord *first = group[0];
+            SpliceKitTranscriptWord *merged = SKCaption_cloneWord(first);
+            merged.text = translatedText;
+            [translatedWords addObject:merged];
+            for (NSUInteger i = 1; i < wordCount; i++) {
+                // Suppress remaining original words by giving them empty text (will be filtered)
+            }
+        } else if (tokenCount <= wordCount) {
+            // Distribute tokens across the original time slots
+            NSUInteger slotsPerToken = MAX(1, wordCount / tokenCount);
+            NSUInteger tokenIdx = 0;
+            NSUInteger slotIdx = 0;
+            while (tokenIdx < tokenCount && slotIdx < wordCount) {
+                SpliceKitTranscriptWord *orig = group[slotIdx];
+                SpliceKitTranscriptWord *w = SKCaption_cloneWord(orig);
+                w.text = tokens[tokenIdx];
+                [translatedWords addObject:w];
+                tokenIdx++;
+                slotIdx += slotsPerToken;
+                // Skip remaining slots for this token (merge timing into first slot)
+                for (NSUInteger skip = 1; skip < slotsPerToken && slotIdx + skip < wordCount; skip++) {
+                    // Absorbed into previous word — skip
+                }
+                slotIdx = MIN(slotIdx, wordCount);
+                if (tokenIdx < tokenCount && slotIdx < wordCount) {
+                    // continue normally
+                } else {
+                    // Remaining slots after last token: append trailing tokens to last word if any
+                    break;
+                }
+            }
+            // Append any leftover tokens to the last added word
+            if (tokenIdx < tokenCount && translatedWords.count > 0) {
+                SpliceKitTranscriptWord *last = translatedWords.lastObject;
+                NSRange rest = NSMakeRange(tokenIdx, tokenCount - tokenIdx);
+                NSString *tail = [[tokens subarrayWithRange:rest] componentsJoinedByString:@" "];
+                last.text = [last.text stringByAppendingFormat:@" %@", tail];
+            }
+        } else {
+            // More Korean tokens than original words — distribute N tokens per word
+            // Strategy: assign tokens round-robin to time slots
+            for (NSUInteger i = 0; i < wordCount; i++) {
+                NSUInteger startTok = (i * tokenCount) / wordCount;
+                NSUInteger endTok   = ((i + 1) * tokenCount) / wordCount;
+                NSRange r = NSMakeRange(startTok, MAX(1, endTok - startTok));
+                if (r.location + r.length > tokenCount) r.length = tokenCount - r.location;
+                NSString *chunk = [[tokens subarrayWithRange:r] componentsJoinedByString:@" "];
+                SpliceKitTranscriptWord *w = SKCaption_cloneWord(group[i]);
+                w.text = chunk;
+                [translatedWords addObject:w];
+            }
+        }
+        translatedGroupCount++;
+    }
+
+    SpliceKit_log(@"[Captions] Translated %lu groups to Korean (%lu words → %lu translated words). Errors: %lu",
+        (unsigned long)groups.count, (unsigned long)words.count,
+        (unsigned long)translatedWords.count, (unsigned long)errors.count);
+
+    return @{
+        @"status": @"ok",
+        @"translatedWords": translatedWords,
+        @"groupCount": @(groups.count),
+        @"errorCount": @(errors.count),
+        @"errors": errors,
+    };
+}
 
 - (NSDictionary *)exportSRT:(NSString *)outputPath {
     [self ensurePersistedStateLoaded];
