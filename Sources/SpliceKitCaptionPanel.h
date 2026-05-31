@@ -139,6 +139,10 @@ extern NSNotificationName const SpliceKitCaptionDidGenerateNotification;
 - (NSDictionary *)translateWordsToKorean:(NSArray<SpliceKitTranscriptWord *> *)words
                            sourceLanguage:(NSString *)sourceLang;
 
+// Transcriber binary paths (used by server for model download/check)
+- (NSString *)whisperTranscriberPath;
+- (NSString *)parakeetTranscriberPath;
+
 // Style
 - (void)setStyle:(SpliceKitCaptionStyle *)style;
 - (SpliceKitCaptionStyle *)currentStyle;

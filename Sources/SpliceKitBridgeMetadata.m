@@ -129,6 +129,8 @@ static void SpliceKit_initBuiltinMetadata(void) {
             @"captions.exportSRT": meta(@"safe", @"Write SRT file."),
             @"captions.exportTXT": meta(@"safe", @"Write plain text file."),
             @"captions.translateToKorean": meta(@"state_dependent", @"Translate loaded caption words to Korean (requires network)."),
+            @"captions.checkWhisperModel": meta(@"safe", @"Check whether Whisper model is downloaded and cached."),
+            @"captions.downloadWhisperModel": meta(@"state_dependent", @"Download Whisper CoreML model in background (first-time setup).")  ,
 
             // transcript.*
             @"transcript.open": meta(@"destructive", @"Transcribe timeline or file (long-running)."),

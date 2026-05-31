@@ -2455,6 +2455,32 @@ static void SpliceKit_installDragSpy(void) {
         SpliceKit_log(@"[Captions] Transcription language hint: %@ (code: %@)", langHint, langCode);
     }
 
+    // For Whisper: pass --offline when model is known to be cached so we skip the
+    // download check entirely and fail fast with a clear message if somehow not cached.
+    BOOL isWhisperEngine = [engineID hasPrefix:@"whisper"];
+    if (isWhisperEngine) {
+        NSString *whisperVariant = [engineID isEqualToString:@"whisperLargeV3"] ? @"large-v3" : @"large-v3_turbo";
+        NSURL *appSupport = [[[NSFileManager defaultManager]
+            URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask] firstObject];
+        NSURL *modelPath = [[[[appSupport URLByAppendingPathComponent:@"SpliceKit/Models/whisper"]
+            URLByAppendingPathComponent:@"models"]
+            URLByAppendingPathComponent:@"argmaxinc/whisperkit-coreml"]
+            URLByAppendingPathComponent:[NSString stringWithFormat:@"openai_whisper-%@", whisperVariant]];
+        NSArray *comps = @[@"MelSpectrogram.mlmodelc", @"AudioEncoder.mlmodelc", @"TextDecoder.mlmodelc"];
+        BOOL cached = YES;
+        for (NSString *comp in comps) {
+            NSURL *weight = [[modelPath URLByAppendingPathComponent:comp]
+                URLByAppendingPathComponent:@"weights/weight.bin"];
+            if (![[NSFileManager defaultManager] fileExistsAtPath:weight.path]) { cached = NO; break; }
+        }
+        if (cached) {
+            [taskArgs addObject:@"--offline"];
+            SpliceKit_log(@"[Captions] Whisper model cached — using --offline mode");
+        } else {
+            SpliceKit_log(@"[Captions] Whisper model not cached — will download on first run");
+        }
+    }
+
     NSTask *task = [[NSTask alloc] init];
     task.launchPath = binaryPath;
     task.arguments = taskArgs;

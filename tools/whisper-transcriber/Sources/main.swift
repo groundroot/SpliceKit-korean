@@ -2,17 +2,26 @@ import Foundation
 import WhisperKit
 
 // Usage:
-//   whisper-transcriber <audio-file>   [--progress] [--model large-v3|large-v3-turbo]
-//   whisper-transcriber --batch <json> [--progress] [--model large-v3|large-v3-turbo]
+//   whisper-transcriber <audio-file>   [--progress] [--model large-v3|large-v3-turbo] [--language ko]
+//   whisper-transcriber --batch <json> [--progress] [--model large-v3|large-v3-turbo] [--language ko]
+//   whisper-transcriber --download-only [--model large-v3|large-v3-turbo] [--progress]
+//   whisper-transcriber --check-model [--model large-v3|large-v3-turbo]
 //
 // Output contract matches parakeet-transcriber:
-//   Single mode: JSON array of word dicts to stdout
-//   Batch mode:  JSON array of {"file":path, "words":[...]} to stdout
-//   Progress:    "PROGRESS:<fraction>:<message>" lines to stderr when --progress set
+//   Single mode:      JSON array of word dicts to stdout
+//   Batch mode:       JSON array of {"file":path, "words":[...]} to stdout
+//   Download-only:    exits 0 on success, 1 on error (progress to stderr)
+//   Check-model:      JSON {"cached":bool,"path":"...","model":"..."} to stdout
+//   Progress:         "PROGRESS:<fraction>:<message>" lines to stderr when --progress set
 //
-// Runs Whisper via CoreML on the Apple Neural Engine using WhisperKit. The
-// CoreML encoder + decoder is downloaded from HuggingFace on first use into
-// ~/Library/Application Support/SpliceKit/Models/whisper/.
+// Flags:
+//   --offline         Fail immediately if model is not already cached. Never downloads.
+//   --download-only   Download the model and exit. No transcription. Safe to run in background.
+//   --check-model     Print cache status JSON and exit. No downloads.
+//   --language <code> BCP-47 language code hint, e.g. "ko", "en", "ja". Default: auto-detect.
+//
+// Runs Whisper via CoreML on the Apple Neural Engine using WhisperKit. Models are cached in
+// ~/Library/Application Support/SpliceKit/Models/whisper/ after the first download.
 
 let progressLock = NSLock()
 
@@ -32,15 +41,23 @@ func printError(_ message: String) {
 struct BatchEntry { let file: String }
 
 let args = CommandLine.arguments
-guard args.count >= 2 else {
-    printError("Usage: whisper-transcriber <audio-file> [--progress] [--model large-v3|large-v3-turbo]")
-    printError("       whisper-transcriber --batch <manifest.json> [--progress] [--model large-v3|large-v3-turbo]")
-    exit(1)
-}
 
 let showProgress = args.contains("--progress")
 let batchMode = args.contains("--batch")
+let offlineMode = args.contains("--offline")
+let downloadOnly = args.contains("--download-only")
+let checkModelMode = args.contains("--check-model")
 
+// --check-model and --download-only don't need an audio file arg; others do.
+guard args.count >= 2 || downloadOnly || checkModelMode else {
+    printError("Usage: whisper-transcriber <audio-file> [--progress] [--model large-v3|large-v3-turbo] [--language ko]")
+    printError("       whisper-transcriber --batch <manifest.json> [--progress] [--model large-v3|large-v3-turbo] [--language ko]")
+    printError("       whisper-transcriber --download-only [--model large-v3|large-v3-turbo] [--progress]")
+    printError("       whisper-transcriber --check-model [--model large-v3|large-v3-turbo]")
+    exit(1)
+}
+
+// Model selection
 // Default to large-v3-turbo (much faster, nearly identical quality for captions).
 // WhisperKit variant names match HuggingFace repo subdirs under argmaxinc/whisperkit-coreml.
 // Turbo variant is "large-v3_turbo" (underscore), not "large-v3-turbo" (hyphen).
@@ -59,30 +76,45 @@ if let idx = args.firstIndex(of: "--model"), idx + 1 < args.count {
     }
 }
 
+// Language hint (BCP-47 code like "ko", "en", "ja"). nil = auto-detect.
+var languageHint: String? = nil
+if let idx = args.firstIndex(of: "--language"), idx + 1 < args.count {
+    let code = args[idx + 1].lowercased()
+    // Normalize locale identifiers: "ko-KR" -> "ko", "en-US" -> "en"
+    languageHint = code.components(separatedBy: "-").first ?? code
+}
+
+// Batch entries (only parsed if not in download-only or check-model mode)
 var batchEntries: [BatchEntry] = []
-if batchMode {
-    guard let batchIdx = args.firstIndex(of: "--batch"), batchIdx + 1 < args.count else {
-        printError("--batch requires a manifest JSON file path")
-        exit(1)
+if !downloadOnly && !checkModelMode {
+    if batchMode {
+        guard let batchIdx = args.firstIndex(of: "--batch"), batchIdx + 1 < args.count else {
+            printError("--batch requires a manifest JSON file path")
+            exit(1)
+        }
+        let manifestPath = args[batchIdx + 1]
+        guard let data = FileManager.default.contents(atPath: manifestPath),
+              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            printError("Failed to read batch manifest: \(manifestPath)")
+            exit(1)
+        }
+        for entry in arr {
+            if let file = entry["file"] as? String { batchEntries.append(BatchEntry(file: file)) }
+        }
+        if batchEntries.isEmpty {
+            printError("No files in batch manifest"); exit(1)
+        }
+    } else {
+        guard args.count >= 2 else {
+            printError("Audio file path required")
+            exit(1)
+        }
+        let audioPath = args[1]
+        guard FileManager.default.fileExists(atPath: audioPath) else {
+            printError("File not found: \(audioPath)"); exit(1)
+        }
+        batchEntries.append(BatchEntry(file: audioPath))
     }
-    let manifestPath = args[batchIdx + 1]
-    guard let data = FileManager.default.contents(atPath: manifestPath),
-          let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
-        printError("Failed to read batch manifest: \(manifestPath)")
-        exit(1)
-    }
-    for entry in arr {
-        if let file = entry["file"] as? String { batchEntries.append(BatchEntry(file: file)) }
-    }
-    if batchEntries.isEmpty {
-        printError("No files in batch manifest"); exit(1)
-    }
-} else {
-    let audioPath = args[1]
-    guard FileManager.default.fileExists(atPath: audioPath) else {
-        printError("File not found: \(audioPath)"); exit(1)
-    }
-    batchEntries.append(BatchEntry(file: audioPath))
 }
 
 // Models live under ~/Library/Application Support/SpliceKit/Models/whisper/
@@ -98,14 +130,50 @@ let fullModelPath = modelsDir
     .appendingPathComponent("models")
     .appendingPathComponent(modelRepo)
     .appendingPathComponent(variantFolder)
+
 // A fully-downloaded .mlmodelc always contains weights/weight.bin. Checking just the directory
 // misses interrupted downloads, producing a "Could not open weight.bin" load failure later.
 let requiredComponents = ["MelSpectrogram.mlmodelc", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"]
-let isCached = requiredComponents.allSatisfy { component -> Bool in
-    let mlmodelc = fullModelPath.appendingPathComponent(component)
-    guard FileManager.default.fileExists(atPath: mlmodelc.path) else { return false }
-    let weight = mlmodelc.appendingPathComponent("weights/weight.bin")
-    return FileManager.default.fileExists(atPath: weight.path)
+func checkCacheIntegrity() -> (isCached: Bool, missingComponents: [String]) {
+    var missing: [String] = []
+    for component in requiredComponents {
+        let mlmodelc = fullModelPath.appendingPathComponent(component)
+        let weight = mlmodelc.appendingPathComponent("weights/weight.bin")
+        if !FileManager.default.fileExists(atPath: mlmodelc.path) ||
+           !FileManager.default.fileExists(atPath: weight.path) {
+            missing.append(component)
+        }
+    }
+    return (missing.isEmpty, missing)
+}
+let (isCached, missingComponents) = checkCacheIntegrity()
+
+// --check-model: print JSON status and exit immediately (no downloads)
+if checkModelMode {
+    var status: [String: Any] = [
+        "cached": isCached,
+        "model": modelVariant,
+        "prettyName": prettyName,
+        "path": fullModelPath.path,
+        "approxSizeMB": approxSizeMB,
+    ]
+    if !isCached {
+        status["missingComponents"] = missingComponents
+    }
+    if let data = try? JSONSerialization.data(withJSONObject: status, options: [.sortedKeys]),
+       let str = String(data: data, encoding: .utf8) {
+        print(str)
+    }
+    exit(isCached ? 0 : 1)
+}
+
+// --offline: refuse to download; fail fast if not cached
+if offlineMode && !isCached {
+    printError("Whisper model '\(modelVariant)' is not cached and --offline was specified.")
+    printError("Run without --offline (or use --download-only) to download the model first:")
+    printError("  whisper-transcriber --download-only --model \(modelVariant) --progress")
+    printError("Model would be saved to: \(fullModelPath.path)")
+    exit(1)
 }
 
 func floatValue(_ value: Any?) -> Float? {
@@ -120,22 +188,18 @@ func normalizedWordTimings(_ words: [[String: Any]], minimumDuration: Float = 1.
     var normalized = words.sorted {
         (floatValue($0["startTime"]) ?? 0) < (floatValue($1["startTime"]) ?? 0)
     }
-
     var previousEnd: Float = 0
     for index in normalized.indices {
         var start = floatValue(normalized[index]["startTime"]) ?? previousEnd
         var end = floatValue(normalized[index]["endTime"]) ?? (start + minimumDuration)
-
         if !start.isFinite { start = previousEnd }
         if !end.isFinite { end = start + minimumDuration }
         if start < previousEnd { start = previousEnd }
         if end <= start { end = start + minimumDuration }
-
         normalized[index]["startTime"] = start
         normalized[index]["endTime"] = end
         previousEnd = end
     }
-
     return normalized
 }
 
@@ -155,7 +219,6 @@ func extractWords(from transcription: [TranscriptionResult]) -> [[String: Any]] 
                     ])
                 }
             } else {
-                // Fallback: emit the whole segment as one word if no per-word timing.
                 let trimmed = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty {
                     words.append([
@@ -179,6 +242,8 @@ Task {
         if showProgress {
             if isCached {
                 reportProgress(0.05, "Loading \(prettyName) model (cached)...")
+            } else if downloadOnly {
+                reportProgress(0.01, "Starting \(prettyName) download (~\(approxSizeMB) MB)...")
             } else {
                 reportProgress(0.03, "Downloading \(prettyName) CoreML model (~\(approxSizeMB) MB)... First run only.")
             }
@@ -205,6 +270,9 @@ Task {
 
         if !isCached {
             do {
+                if showProgress {
+                    reportProgress(0.05, "Downloading \(prettyName) (~\(approxSizeMB) MB) from HuggingFace...")
+                }
                 let downloadedURL = try await WhisperKit.download(
                     variant: modelVariant,
                     downloadBase: modelsDir,
@@ -212,12 +280,14 @@ Task {
                     from: modelRepo,
                     progressCallback: { progress in
                         if showProgress {
+                            // Download = 5%..60%
                             let frac = 0.05 + 0.55 * progress.fractionCompleted
                             reportProgress(frac, "Downloading \(prettyName)... \(Int(progress.fractionCompleted * 100))%")
                         }
                     }
                 )
                 whisper.modelFolder = downloadedURL
+                if showProgress { reportProgress(0.60, "Download complete.") }
             } catch {
                 let msg = error.localizedDescription
                 if msg.contains("rate") || msg.contains("429") || msg.contains("503") {
@@ -230,6 +300,7 @@ Task {
                     printError("Model download failed: \(msg)")
                 }
                 printError("TIP: Delete \(fullModelPath.path) and retry.")
+                printError("To pre-download: whisper-transcriber --download-only --model \(modelVariant) --progress")
                 throw error
             }
         }
@@ -238,6 +309,26 @@ Task {
         // Set modelFolder to the cached path so loadModels() can find it.
         if isCached && whisper.modelFolder == nil {
             whisper.modelFolder = fullModelPath
+        }
+
+        // --download-only: we only needed to ensure the model is downloaded.
+        // Skip compilation and transcription.
+        if downloadOnly {
+            if showProgress { reportProgress(1.0, "\(prettyName) downloaded and ready for offline use.") }
+            let (nowCached, _) = checkCacheIntegrity()
+            let result: [String: Any] = [
+                "status": "ok",
+                "cached": nowCached,
+                "model": modelVariant,
+                "path": fullModelPath.path,
+                "alreadyCached": isCached,
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]),
+               let str = String(data: data, encoding: .utf8) {
+                print(str)
+            }
+            semaphore.signal()
+            return
         }
 
         if showProgress { reportProgress(0.62, "Compiling CoreML models for your device...") }
@@ -266,17 +357,17 @@ Task {
             if showProgress {
                 let pct = 0.68 + (0.30 * Double(index) / totalFiles)
                 let name = (entry.file as NSString).lastPathComponent
-                reportProgress(pct, "Transcribing \(index + 1)/\(Int(totalFiles)): \(name)...")
+                let langSuffix = languageHint.map { " [\($0)]" } ?? ""
+                reportProgress(pct, "Transcribing \(index + 1)/\(Int(totalFiles)): \(name)\(langSuffix)...")
             }
 
             // Use .none rather than .vad: VAD was dropping long stretches of the source
             // (e.g. first 83s of a 4-min Tim Keller meditation, ~70% fewer words than
-            // Parakeet). .none slides a 30s window across the whole file so nothing is
-            // skipped. For a 4-min file this costs seconds of extra inference.
+            // Parakeet). .none slides a 30s window across the whole file so nothing is skipped.
             let options = DecodingOptions(
                 verbose: false,
                 task: .transcribe,
-                language: nil,
+                language: languageHint,
                 temperature: 0.0,
                 wordTimestamps: true,
                 chunkingStrategy: .none
@@ -306,7 +397,8 @@ Task {
                 if r["word"] != nil { return sum + 1 }
                 return sum
             }
-            reportProgress(1.0, "Done — \(totalWords) words from \(batchEntries.count) file(s)")
+            let langNote = languageHint.map { " (lang: \($0))" } ?? ""
+            reportProgress(1.0, "Done — \(totalWords) words from \(batchEntries.count) file(s)\(langNote)")
         }
 
         let jsonData = try JSONSerialization.data(withJSONObject: allResults, options: [.sortedKeys])

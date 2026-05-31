@@ -6688,6 +6688,88 @@ def open_captions(file_url: str = "", style: str = "") -> str:
     return _fmt(r)
 
 
+@mcp.tool()
+def check_whisper_model(model: str = "large-v3-turbo") -> str:
+    """Check whether a Whisper CoreML model is downloaded and ready for offline use.
+
+    Args:
+        model: "large-v3-turbo" (default, ~950 MB) or "large-v3" (~1.5 GB) or "all"
+
+    Returns cache status, file path, and model size.
+    Use before transcribing to know if a download will be needed.
+    Use after download_whisper_model() to confirm the download completed.
+    """
+    r = bridge.call("captions.checkWhisperModel", model=model)
+    if _err(r):
+        return f"Error: {r.get('error', r)}"
+
+    if model == "all":
+        models = r.get("models", [])
+        lines = []
+        for m in models:
+            status = "✓ Cached" if m.get("cached") else "✗ Not cached"
+            lines.append(f"{status}  {m['prettyName']} (~{m['approxSizeMB']} MB)")
+            lines.append(f"  Path: {m['path']}")
+        return "\n".join(lines)
+
+    cached = r.get("cached", False)
+    lines = [
+        f"Model: {r.get('prettyName', model)}",
+        f"Status: {'✓ Cached — ready for offline use' if cached else '✗ Not cached — will download on first transcription'}",
+        f"Size: ~{r.get('approxSizeMB', '?')} MB",
+        f"Path: {r.get('path', '?')}",
+    ]
+    if not cached:
+        lines.append(
+            "\nTo pre-download now (requires internet):\n"
+            "  download_whisper_model()"
+        )
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def download_whisper_model(model: str = "large-v3-turbo") -> str:
+    """Download a Whisper CoreML model for offline use.
+
+    Downloads in the background inside FCP's process — you can continue
+    working while it downloads. The model is saved to:
+      ~/Library/Application Support/SpliceKit/Models/whisper/
+
+    After downloading, Whisper transcription works completely offline.
+    No internet is required for subsequent transcriptions.
+
+    Args:
+        model: "large-v3-turbo" (default, ~950 MB, faster) or "large-v3" (~1.5 GB, highest quality)
+
+    Requires:
+      - SpliceKit patcher has been run (whisper-transcriber binary present)
+      - ~1-2 GB free disk space
+      - Internet connection (one-time download from HuggingFace)
+
+    Use check_whisper_model() to monitor download progress.
+    """
+    r = bridge.call("captions.downloadWhisperModel", model=model)
+    if _err(r):
+        return f"Error: {r.get('error', r)}"
+
+    status = r.get("status", "")
+    if status == "already_cached":
+        return (
+            f"{r.get('prettyName', model)} is already downloaded.\n"
+            f"Path: {r.get('path', '?')}\n"
+            f"Ready for offline use."
+        )
+    if status == "downloading":
+        return (
+            f"Downloading {r.get('prettyName', model)} (~{r.get('approxSizeMB', '?')} MB)...\n"
+            f"Running in background (PID {r.get('pid', '?')}).\n"
+            f"Path: {r.get('path', '?')}\n\n"
+            f"Use check_whisper_model() to confirm when complete.\n"
+            f"Download progress is also visible in FCP's system log."
+        )
+    return _fmt(r)
+
+
 @mcp.tool(annotations=_tool_annotations("close_captions"))
 def close_captions() -> str:
     """Close the social captions panel."""

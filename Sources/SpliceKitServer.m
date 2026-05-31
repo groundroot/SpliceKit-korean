@@ -7262,6 +7262,143 @@ static NSDictionary *SpliceKit_handleCaptionsVerify(NSDictionary *params) {
 }
 
 // Clean up stale "SpliceKit Caption Import" projects from the library.
+// Returns the cache path for a given Whisper model variant.
+// variant: "large-v3_turbo" or "large-v3"
+static NSURL *SpliceKit_whisperModelPath(NSString *variant) {
+    NSURL *appSupport = [[[NSFileManager defaultManager]
+        URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask] firstObject];
+    return [[[[appSupport URLByAppendingPathComponent:@"SpliceKit/Models/whisper"]
+        URLByAppendingPathComponent:@"models"]
+        URLByAppendingPathComponent:@"argmaxinc/whisperkit-coreml"]
+        URLByAppendingPathComponent:[NSString stringWithFormat:@"openai_whisper-%@", variant]];
+}
+
+static BOOL SpliceKit_isWhisperModelCached(NSString *variant) {
+    NSURL *modelPath = SpliceKit_whisperModelPath(variant);
+    NSArray *components = @[@"MelSpectrogram.mlmodelc", @"AudioEncoder.mlmodelc", @"TextDecoder.mlmodelc"];
+    for (NSString *comp in components) {
+        NSURL *mlmodelc = [modelPath URLByAppendingPathComponent:comp];
+        NSURL *weight = [mlmodelc URLByAppendingPathComponent:@"weights/weight.bin"];
+        if (![[NSFileManager defaultManager] fileExistsAtPath:mlmodelc.path] ||
+            ![[NSFileManager defaultManager] fileExistsAtPath:weight.path]) {
+            return NO;
+        }
+    }
+    return YES;
+}
+
+// captions.checkWhisperModel: returns cache status for one or both variants.
+// params: model = "large-v3-turbo" (default) | "large-v3" | "all"
+static NSDictionary *SpliceKit_handleCaptionsCheckWhisperModel(NSDictionary *params) {
+    NSString *modelArg = params[@"model"] ?: @"large-v3-turbo";
+    BOOL checkAll = [modelArg isEqualToString:@"all"];
+    NSArray *variants = checkAll
+        ? @[@"large-v3_turbo", @"large-v3"]
+        : @[[modelArg isEqualToString:@"large-v3"] ? @"large-v3" : @"large-v3_turbo"];
+
+    NSMutableArray *results = [NSMutableArray array];
+    for (NSString *variant in variants) {
+        BOOL cached = SpliceKit_isWhisperModelCached(variant);
+        NSURL *path = SpliceKit_whisperModelPath(variant);
+        NSString *prettyName = [variant isEqualToString:@"large-v3"] ? @"Whisper large-v3" : @"Whisper large-v3-turbo";
+        NSInteger sizeMB = [variant isEqualToString:@"large-v3"] ? 1550 : 950;
+        [results addObject:@{
+            @"model": variant,
+            @"prettyName": prettyName,
+            @"cached": @(cached),
+            @"path": path.path,
+            @"approxSizeMB": @(sizeMB),
+        }];
+    }
+
+    if (checkAll) {
+        return @{@"status": @"ok", @"models": results};
+    }
+    NSDictionary *r = results.firstObject;
+    return @{
+        @"status": @"ok",
+        @"model": r[@"model"],
+        @"prettyName": r[@"prettyName"],
+        @"cached": r[@"cached"],
+        @"path": r[@"path"],
+        @"approxSizeMB": r[@"approxSizeMB"],
+    };
+}
+
+// captions.downloadWhisperModel: triggers --download-only in background via whisper-transcriber.
+// Does NOT block — returns immediately. Use captions.checkWhisperModel to poll for completion.
+// params: model = "large-v3-turbo" (default) | "large-v3"
+static NSDictionary *SpliceKit_handleCaptionsDownloadWhisperModel(NSDictionary *params) {
+    NSString *modelArg = params[@"model"] ?: @"large-v3-turbo";
+    NSString *variant = [modelArg isEqualToString:@"large-v3"] ? @"large-v3" : @"large-v3_turbo";
+    NSString *prettyName = [variant isEqualToString:@"large-v3"] ? @"Whisper large-v3" : @"Whisper large-v3-turbo";
+    NSInteger sizeMB = [variant isEqualToString:@"large-v3"] ? 1550 : 950;
+
+    if (SpliceKit_isWhisperModelCached(variant)) {
+        return @{
+            @"status": @"already_cached",
+            @"model": variant,
+            @"prettyName": prettyName,
+            @"path": SpliceKit_whisperModelPath(variant).path,
+            @"message": [NSString stringWithFormat:@"%@ is already downloaded.", prettyName],
+        };
+    }
+
+    // Find the binary path via the caption panel helper
+    SpliceKitCaptionPanel *panel = [SpliceKitCaptionPanel sharedPanel];
+    NSString *binaryPath = nil;
+    @try {
+        binaryPath = [panel whisperTranscriberPath];
+    } @catch (...) {}
+
+    if (!binaryPath || ![[NSFileManager defaultManager] isExecutableFileAtPath:binaryPath]) {
+        return @{@"error": [NSString stringWithFormat:
+            @"whisper-transcriber binary not found. Re-run the SpliceKit patcher.\n"
+            @"Expected at: ~/Applications/SpliceKit/tools/whisper-transcriber"]};
+    }
+
+    // Launch download in background — fire and forget
+    NSTask *task = [[NSTask alloc] init];
+    task.launchPath = binaryPath;
+    task.arguments = @[@"--download-only", @"--model", modelArg, @"--progress"];
+
+    // Pipe stderr so progress lines go to the SpliceKit log
+    NSPipe *errPipe = [NSPipe pipe];
+    task.standardError = errPipe;
+    task.standardOutput = [NSPipe pipe]; // discard stdout for download-only
+
+    errPipe.fileHandleForReading.readabilityHandler = ^(NSFileHandle *handle) {
+        NSData *data = handle.availableData;
+        if (data.length == 0) return;
+        NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        for (NSString *line in [text componentsSeparatedByString:@"\n"]) {
+            if (line.length > 0) SpliceKit_log(@"[WhisperDownload] %@", line);
+        }
+    };
+
+    NSError *launchErr = nil;
+    @try {
+        [task launch];
+    } @catch (NSException *e) {
+        return @{@"error": [NSString stringWithFormat:@"Failed to launch download: %@", e.reason]};
+    }
+
+    SpliceKit_log(@"[WhisperDownload] Started background download of %@ (PID %d)", prettyName, task.processIdentifier);
+
+    return @{
+        @"status": @"downloading",
+        @"model": variant,
+        @"prettyName": prettyName,
+        @"approxSizeMB": @(sizeMB),
+        @"path": SpliceKit_whisperModelPath(variant).path,
+        @"message": [NSString stringWithFormat:
+            @"Downloading %@ (~%ld MB) in background. "
+            @"Use captions.checkWhisperModel to check when complete.",
+            prettyName, (long)sizeMB],
+        @"pid": @(task.processIdentifier),
+    };
+}
+
 static NSDictionary *SpliceKit_handleCaptionsCleanup(NSDictionary *params) {
     __block NSDictionary *result = nil;
     SpliceKit_executeOnMainThread(^{
@@ -27859,6 +27996,10 @@ NSDictionary *SpliceKit_handleRequest(NSDictionary *request) {
         result = SpliceKit_handleCaptionsVerify(params);
     } else if ([method isEqualToString:@"captions.cleanup"]) {
         result = SpliceKit_handleCaptionsCleanup(params);
+    } else if ([method isEqualToString:@"captions.checkWhisperModel"]) {
+        result = SpliceKit_handleCaptionsCheckWhisperModel(params);
+    } else if ([method isEqualToString:@"captions.downloadWhisperModel"]) {
+        result = SpliceKit_handleCaptionsDownloadWhisperModel(params);
     }
     // native captions (FFAnchoredCaption objects in caption lane)
     else if ([method isEqualToString:@"nativeCaptions.generate"]) {
