@@ -95,6 +95,9 @@ sign_modded_app() {
         return 1
     fi
 
+    if ! sign_if_present "$identity" "$MODDED_APP/Contents/Frameworks/Sentry.framework"; then
+        return 1
+    fi
     if ! codesign --force --options runtime --sign "$identity" "$MODDED_APP/Contents/Frameworks/SpliceKit.framework"; then
         return 1
     fi
@@ -294,42 +297,10 @@ step "Step 2: Building SpliceKit dylib"
 BUILD_DIR="$REPO_DIR/build"
 mkdir -p "$BUILD_DIR"
 
-# Read canonical source list from Sources/SOURCES.txt
-SOURCES=()
-while IFS= read -r line; do
-    [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
-    SOURCES+=("$REPO_DIR/Sources/$line")
-done < "$REPO_DIR/Sources/SOURCES.txt"
-
-# Build Lua 5.4.7 static library if vendored sources exist
-LUA_DIR="$REPO_DIR/vendor/lua-5.4.7/src"
-LUA_LIB="$BUILD_DIR/liblua.a"
-LUA_FLAGS=""
-if [ -d "$LUA_DIR" ]; then
-    info "Building Lua 5.4.7 static library..."
-    mkdir -p "$BUILD_DIR/lua_obj"
-    for src in "$LUA_DIR"/*.c; do
-        base="$(basename "$src" .c)"
-        [ "$base" = "lua" ] && continue
-        [ "$base" = "luac" ] && continue
-        clang -arch arm64 -arch x86_64 -mmacosx-version-min=14.0 \
-            -DLUA_USE_MACOSX -O2 -Wall -c "$src" -o "$BUILD_DIR/lua_obj/$base.o"
-    done
-    libtool -static -o "$LUA_LIB" "$BUILD_DIR"/lua_obj/*.o
-    LUA_FLAGS="-I $LUA_DIR $LUA_LIB"
-    log "Built: $LUA_LIB"
-fi
-
-info "Compiling ${#SOURCES[@]} source files..."
-clang -arch arm64 -arch x86_64 \
-    -mmacosx-version-min=14.0 \
-    -framework Foundation -framework AppKit -framework AVFoundation -framework Speech -framework CoreServices \
-    -fobjc-arc -fmodules -Wno-deprecated-declarations \
-    -undefined dynamic_lookup -dynamiclib \
-    -install_name @rpath/SpliceKit.framework/Versions/A/SpliceKit \
-    -I "$REPO_DIR/Sources" \
-    "${SOURCES[@]}" $LUA_FLAGS \
-    -o "$BUILD_DIR/SpliceKit" 2>&1
+# Build via the canonical Makefile (handles Lua, Sentry, ObjC++ sources)
+bash "$REPO_DIR/Scripts/ensure_sentry_framework.sh"
+info "Building SpliceKit via Makefile..."
+make -C "$REPO_DIR" all
 
 log "Built: $(file "$BUILD_DIR/SpliceKit" | grep -o 'universal.*')"
 
@@ -367,6 +338,10 @@ cat > "$FW_DIR/Versions/A/Resources/Info.plist" << 'PLIST'
 </plist>
 PLIST
 
+# Sentry.framework is a link-time dependency of the SpliceKit dylib
+rm -rf "$MODDED_APP/Contents/Frameworks/Sentry.framework"
+cp -R "$REPO_DIR/patcher/Frameworks/Sentry.framework" "$MODDED_APP/Contents/Frameworks/Sentry.framework"
+
 log "Framework installed"
 
 # ============================================================
@@ -377,7 +352,7 @@ step "Step 4: Injecting dylib into FCP binary"
 BINARY="$MODDED_APP/Contents/MacOS/Final Cut Pro"
 
 # Check if already injected
-if otool -L "$BINARY" 2>/dev/null | grep -q SpliceKit; then
+if otool -L "$BINARY" 2>/dev/null | grep -q "@rpath/SpliceKit.framework/Versions/A/SpliceKit"; then
     log "Already injected (skipping)"
 else
     # Build insert_dylib if needed
